@@ -1,0 +1,178 @@
+import WebSocket from 'react-native-url-polyfill';
+import { WSMessage, ConnectionStatus } from '../types';
+
+type MessageCallback = (message: WSMessage) => void;
+type StatusCallback = (status: ConnectionStatus) => void;
+
+export class ClaudeWebSocketService {
+  private ws: WebSocket | null = null;
+  private serverUrl: string;
+  private messageCallbacks: Set<MessageCallback> = new Set();
+  private statusCallbacks: Set<StatusCallback> = new Set();
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
+  private reconnectDelay = 3000;
+  private currentStatus: ConnectionStatus = 'disconnected';
+  private projectPath: string = '';
+
+  constructor(serverUrl: string) {
+    this.serverUrl = serverUrl;
+  }
+
+  // 连接到服务器
+  connect(projectPath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try {
+        this.projectPath = projectPath;
+        this.updateStatus('connecting');
+
+        // 构建 WebSocket URL
+        const wsUrl = this.serverUrl.replace('http', 'ws') + '/ws';
+        this.ws = new WebSocket(wsUrl);
+
+        this.ws.onopen = () => {
+          console.log('WebSocket 连接成功');
+          this.reconnectAttempts = 0;
+
+          // 发送初始化消息
+          this.send({
+            type: 'init',
+            projectPath: this.projectPath
+          });
+
+          this.updateStatus('connected');
+          resolve();
+        };
+
+        this.ws.onmessage = (event) => {
+          try {
+            const message: WSMessage = JSON.parse(event.data);
+            console.log('收到消息:', message);
+
+            // 处理不同类型的消息
+            switch (message.type) {
+              case 'ready':
+                this.updateStatus('connected');
+                break;
+              case 'error':
+                console.error('服务器错误:', message.message);
+                break;
+            }
+
+            // 通知所有监听器
+            this.messageCallbacks.forEach(callback => callback(message));
+          } catch (error) {
+            console.error('解析消息失败:', error);
+          }
+        };
+
+        this.ws.onerror = (error) => {
+          console.error('WebSocket 错误:', error);
+          this.updateStatus('error');
+          reject(error);
+        };
+
+        this.ws.onclose = () => {
+          console.log('WebSocket 连接关闭');
+          this.updateStatus('disconnected');
+
+          // 尝试重新连接
+          if (this.reconnectAttempts < this.maxReconnectAttempts) {
+            this.reconnectAttempts++;
+            console.log(`尝试重新连接 (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+            setTimeout(() => {
+              this.connect(this.projectPath).catch(console.error);
+            }, this.reconnectDelay);
+          }
+        };
+      } catch (error) {
+        this.updateStatus('error');
+        reject(error);
+      }
+    });
+  }
+
+  // 断开连接
+  disconnect(): void {
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+    this.reconnectAttempts = this.maxReconnectAttempts; // 防止自动重连
+    this.updateStatus('disconnected');
+  }
+
+  // 发送消息
+  send(message: WSMessage): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message));
+    } else {
+      console.error('WebSocket 未连接');
+    }
+  }
+
+  // 发送用户消息
+  sendMessage(content: string, messageId: string): void {
+    this.send({
+      type: 'message',
+      content,
+      id: messageId
+    });
+  }
+
+  // 切换项目
+  changeProject(projectPath: string): void {
+    this.projectPath = projectPath;
+    this.send({
+      type: 'changeProject',
+      projectPath
+    });
+  }
+
+  // 注册消息监听器
+  onMessage(callback: MessageCallback): () => void {
+    this.messageCallbacks.add(callback);
+    return () => this.messageCallbacks.delete(callback);
+  }
+
+  // 注册状态监听器
+  onStatusChange(callback: StatusCallback): () => void {
+    this.statusCallbacks.add(callback);
+    // 立即返回当前状态
+    callback(this.currentStatus);
+    return () => this.statusCallbacks.delete(callback);
+  }
+
+  // 更新状态
+  private updateStatus(status: ConnectionStatus): void {
+    this.currentStatus = status;
+    this.statusCallbacks.forEach(callback => callback(status));
+  }
+
+  // 获取当前状态
+  getStatus(): ConnectionStatus {
+    return this.currentStatus;
+  }
+
+  // 更新服务器 URL
+  updateServerUrl(url: string): void {
+    this.serverUrl = url;
+  }
+
+  // 清理资源
+  dispose(): void {
+    this.disconnect();
+    this.messageCallbacks.clear();
+    this.statusCallbacks.clear();
+  }
+}
+
+// 单例实例
+let serviceInstance: ClaudeWebSocketService | null = null;
+
+export function getWebSocketService(serverUrl: string): ClaudeWebSocketService {
+  if (!serviceInstance || serviceInstance.getStatus() === 'disconnected') {
+    serviceInstance = new ClaudeWebSocketService(serverUrl);
+  }
+  return serviceInstance;
+}
