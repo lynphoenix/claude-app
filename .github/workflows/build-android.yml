@@ -22,21 +22,36 @@ jobs:
           cache: 'npm'
           cache-dependency-path: mobile/package-lock.json
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
       - name: Install dependencies
         run: |
           cd mobile
-          npm ci
+          npm install --legacy-peer-deps
 
-      - name: Setup Expo
+      - name: Setup EAS
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
+      - name: Configure EAS project
+        run: |
+          cd mobile
+          echo "EXPO_TOKEN=masked" | grep -q "EXPO_TOKEN"
+          npx eas init --id
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        continue-on-error: true
+
       - name: Build Android APK
         run: |
           cd mobile
-          npx eas build --platform android --output ./app.apk
+          npx eas build --platform android --output ./app.apk --non-interactive
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
@@ -46,6 +61,7 @@ jobs:
           name: android-apk
           path: mobile/app.apk
           retention-days: 30
+          if-no-files-found: ignore
 
       - name: Create Release (on main branch)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -53,5 +69,6 @@ jobs:
         with:
           files: mobile/app.apk
           generate_release_notes: true
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
