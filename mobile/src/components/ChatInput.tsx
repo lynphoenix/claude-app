@@ -126,7 +126,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     backgroundColor: '#fff',
     borderTopWidth: 1,
-    borderTopColor: #E0E0E0',
+    borderTopColor: '#E0E0E0',
   },
   iconButton: {
     width: 40,

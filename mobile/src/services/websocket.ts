@@ -1,11 +1,18 @@
-import WebSocket from 'react-native-url-polyfill';
 import { WSMessage, ConnectionStatus } from '../types';
 
 type MessageCallback = (message: WSMessage) => void;
 type StatusCallback = (status: ConnectionStatus) => void;
 
+// WebSocket 常量
+const READY_STATES = {
+  CONNECTING: 0,
+  OPEN: 1,
+  CLOSING: 2,
+  CLOSED: 3
+};
+
 export class ClaudeWebSocketService {
-  private ws: WebSocket | null = null;
+  private ws: any = null;
   private serverUrl: string;
   private messageCallbacks: Set<MessageCallback> = new Set();
   private statusCallbacks: Set<StatusCallback> = new Set();
@@ -28,23 +35,25 @@ export class ClaudeWebSocketService {
 
         // 构建 WebSocket URL
         const wsUrl = this.serverUrl.replace('http', 'ws') + '/ws';
-        this.ws = new WebSocket(wsUrl);
+        this.ws = new (global as any).WebSocket(wsUrl);
 
         this.ws.onopen = () => {
           console.log('WebSocket 连接成功');
           this.reconnectAttempts = 0;
 
           // 发送初始化消息
-          this.send({
-            type: 'init',
-            projectPath: this.projectPath
-          });
+          if (this.ws) {
+            this.ws.send(JSON.stringify({
+              type: 'init',
+              projectPath: this.projectPath
+            }));
+          }
 
           this.updateStatus('connected');
           resolve();
         };
 
-        this.ws.onmessage = (event) => {
+        this.ws.onmessage = (event: any) => {
           try {
             const message: WSMessage = JSON.parse(event.data);
             console.log('收到消息:', message);
@@ -66,7 +75,7 @@ export class ClaudeWebSocketService {
           }
         };
 
-        this.ws.onerror = (error) => {
+        this.ws.onerror = (error: any) => {
           console.error('WebSocket 错误:', error);
           this.updateStatus('error');
           reject(error);
@@ -98,13 +107,13 @@ export class ClaudeWebSocketService {
       this.ws.close();
       this.ws = null;
     }
-    this.reconnectAttempts = this.maxReconnectAttempts; // 防止自动重连
+    this.reconnectAttempts = this.maxReconnectAttempts;
     this.updateStatus('disconnected');
   }
 
   // 发送消息
-  send(message: WSMessage): void {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+  send(message: any): void {
+    if (this.ws && this.ws.readyState === READY_STATES.OPEN) {
       this.ws.send(JSON.stringify(message));
     } else {
       console.error('WebSocket 未连接');
@@ -138,7 +147,6 @@ export class ClaudeWebSocketService {
   // 注册状态监听器
   onStatusChange(callback: StatusCallback): () => void {
     this.statusCallbacks.add(callback);
-    // 立即返回当前状态
     callback(this.currentStatus);
     return () => this.statusCallbacks.delete(callback);
   }

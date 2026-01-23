@@ -155,7 +155,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: #E0E0E0,
+    borderBottomColor: '#E0E0E0',
   },
   modalTitle: {
     fontSize: 18,
@@ -169,7 +169,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: #F5F5F5,
+    borderBottomColor: '#F5F5F5',
   },
   selectedItem: {
     backgroundColor: '#E3F2FD',

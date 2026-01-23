@@ -146,7 +146,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: #E0E0E0,
+    borderBottomColor: '#E0E0E0',
   },
   modalTitle: {
     fontSize: 18,
@@ -182,7 +182,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#212121',
     borderWidth: 1,
-    borderColor: #E0E0E0,
+    borderColor: '#E0E0E0',
   },
   saveButton: {
     backgroundColor: '#2196F3',
