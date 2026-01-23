@@ -31,6 +31,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "a6d8d8f7-e9e4-4928-b52a-ab6ba263cbd5"
+      }
+    },
+    "owner": "lynphoenix"
   }
 }
