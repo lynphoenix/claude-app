@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import Markdown from 'react-native-markdown-display';
 import { Message } from '../types';
 
 interface ChatMessageProps {
@@ -22,10 +23,16 @@ export function ChatMessage({ message }: ChatMessageProps) {
   return (
     <View style={[styles.container, isUser ? styles.userContainer : styles.assistantContainer]}>
       <View style={[styles.bubble, isUser ? styles.userBubble : isError ? styles.errorBubble : styles.assistantBubble]}>
-        <Text style={[styles.text, isUser ? styles.userText : styles.assistantText]}>
-          {message.content}
-        </Text>
-        <Text style={styles.timestamp}>
+        {isUser ? (
+          <Text style={[styles.text, styles.userText]}>
+            {message.content}
+          </Text>
+        ) : (
+          <Markdown style={markdownStyles}>
+            {message.content}
+          </Markdown>
+        )}
+        <Text style={[styles.timestamp, isUser && styles.userTimestamp]}>
           {new Date(message.timestamp).toLocaleTimeString('zh-CN', {
             hour: '2-digit',
             minute: '2-digit'
@@ -79,6 +86,10 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 4,
     opacity: 0.7,
+    color: '#212121',
+  },
+  userTimestamp: {
+    color: '#fff',
   },
   systemContainer: {
     alignItems: 'center',
@@ -93,3 +104,71 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
 });
+
+const markdownStyles = {
+  body: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: '#212121',
+  },
+  code_inline: {
+    backgroundColor: '#F5F5F5',
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    fontFamily: 'monospace',
+  },
+  code_block: {
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+    padding: 12,
+    fontFamily: 'monospace',
+    fontSize: 13,
+  },
+  fence: {
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+    padding: 12,
+    fontFamily: 'monospace',
+    fontSize: 13,
+  },
+  heading1: {
+    fontSize: 20,
+    fontWeight: '700',
+    marginVertical: 8,
+    color: '#212121',
+  },
+  heading2: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginVertical: 6,
+    color: '#212121',
+  },
+  heading3: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginVertical: 4,
+    color: '#212121',
+  },
+  link: {
+    color: '#2196F3',
+    textDecorationLine: 'underline' as const,
+  },
+  blockquote: {
+    backgroundColor: '#F5F5F5',
+    borderLeftWidth: 4,
+    borderLeftColor: '#BDBDBD',
+    paddingLeft: 12,
+    paddingVertical: 8,
+    marginVertical: 8,
+  },
+  bullet_list: {
+    marginVertical: 4,
+  },
+  ordered_list: {
+    marginVertical: 4,
+  },
+  list_item: {
+    marginVertical: 2,
+  },
+};

@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AppSettings, ProjectConfig } from '../types';
+import { AppSettings, ProjectConfig, Message } from '../types';
 
 const SETTINGS_KEY = '@claude_app_settings';
+const MESSAGES_KEY = '@claude_app_messages';
 
 const DEFAULT_SETTINGS: AppSettings = {
   serverUrl: 'http://your-server.com:3001',
@@ -63,10 +64,44 @@ export class StorageService {
     await this.saveSettings(settings);
   }
 
+  // 保存项目消息历史
+  async saveProjectMessages(projectPath: string, messages: Message[]): Promise<void> {
+    try {
+      const allMessages = await this.getAllProjectMessages();
+      allMessages[projectPath] = messages;
+      await AsyncStorage.setItem(MESSAGES_KEY, JSON.stringify(allMessages));
+    } catch (error) {
+      console.error('保存消息历史失败:', error);
+    }
+  }
+
+  // 获取项目消息历史
+  async getProjectMessages(projectPath: string): Promise<Message[]> {
+    try {
+      const allMessages = await this.getAllProjectMessages();
+      return allMessages[projectPath] || [];
+    } catch (error) {
+      console.error('获取消息历史失败:', error);
+      return [];
+    }
+  }
+
+  // 获取所有项目的消息历史
+  async getAllProjectMessages(): Promise<Record<string, Message[]>> {
+    try {
+      const value = await AsyncStorage.getItem(MESSAGES_KEY);
+      return value ? JSON.parse(value) : {};
+    } catch (error) {
+      console.error('获取所有消息历史失败:', error);
+      return {};
+    }
+  }
+
   // 清除所有数据
   async clear(): Promise<void> {
     try {
       await AsyncStorage.removeItem(SETTINGS_KEY);
+      await AsyncStorage.removeItem(MESSAGES_KEY);
     } catch (error) {
       console.error('清除数据失败:', error);
       throw error;

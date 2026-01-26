@@ -2,7 +2,7 @@
   "expo": {
     "name": "Claude Code Mobile",
     "slug": "claude-code-mobile",
-    "version": "1.0.0",
+    "version": "1.0.15",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -37,6 +37,17 @@
         "projectId": "a6d8d8f7-e9e4-4928-b52a-ab6ba263cbd5"
       }
     },
-    "owner": "lynphoenix"
+    "owner": "lynphoenix",
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true,
+            "softwareKeyboardLayoutMode": "adjustResize"
+          }
+        }
+      ]
+    ]
   }
 }

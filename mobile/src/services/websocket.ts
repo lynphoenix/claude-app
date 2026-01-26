@@ -27,7 +27,7 @@ export class ClaudeWebSocketService {
   }
 
   // 连接到服务器
-  connect(projectPath: string): Promise<void> {
+  connect(projectPath: string = ''): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
         this.projectPath = projectPath;
@@ -35,17 +35,18 @@ export class ClaudeWebSocketService {
 
         // 构建 WebSocket URL
         const wsUrl = this.serverUrl.replace('http', 'ws') + '/ws';
+        console.log('正在连接到:', wsUrl);
         this.ws = new (global as any).WebSocket(wsUrl);
 
         this.ws.onopen = () => {
           console.log('WebSocket 连接成功');
           this.reconnectAttempts = 0;
 
-          // 发送初始化消息
+          // 发送初始化消息（即使没有项目路径也发送，以获取项目列表）
           if (this.ws) {
             this.ws.send(JSON.stringify({
               type: 'init',
-              projectPath: this.projectPath
+              projectPath: this.projectPath || undefined
             }));
           }
 
@@ -135,6 +136,15 @@ export class ClaudeWebSocketService {
     this.send({
       type: 'changeProject',
       projectPath
+    });
+  }
+
+  // 加载更多历史消息
+  loadMoreHistory(offset: number, limit: number = 20): void {
+    this.send({
+      type: 'loadMoreHistory',
+      offset,
+      limit
     });
   }
 

@@ -18,6 +18,9 @@ export type WSMessageType =
   | 'projectChanged'
   | 'messageAck'
   | 'response'
+  | 'responseChunk'
+  | 'responseDone'
+  | 'historyLoaded'
   | 'error'
   | 'ping'
   | 'pong';
@@ -31,6 +34,11 @@ export interface WSMessage {
   messageId?: string;
   projectPath?: string;
   projects?: string[];
+  history?: any[]; // Claude Code session 历史
+  hasMoreHistory?: boolean; // 是否有更多历史
+  totalMessages?: number; // 总消息数
+  offset?: number; // 当前偏移量
+  hasMore?: boolean; // 是否还有更多（用于 historyLoaded）
 }
 
 // 项目配置接口

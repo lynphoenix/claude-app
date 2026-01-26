@@ -1,14 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Text,
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as Speech from 'expo-speech';
+import Voice, {
+  SpeechResultsEvent,
+  SpeechErrorEvent,
+} from '@dev-amirzubair/react-native-voice';
 
 interface ChatInputProps {
   onSend: (text: string) => void;
@@ -20,6 +22,42 @@ export function ChatInput({ onSend, isLoading = false, enableVoice = true }: Cha
   const [text, setText] = useState('');
   const [isListening, setIsListening] = useState(false);
 
+  useEffect(() => {
+    // 设置语音识别监听器
+    Voice.onSpeechStart = () => {
+      console.log('语音识别开始');
+      setIsListening(true);
+    };
+
+    Voice.onSpeechEnd = () => {
+      console.log('语音识别结束');
+      setIsListening(false);
+    };
+
+    Voice.onSpeechResults = (e: SpeechResultsEvent) => {
+      console.log('识别结果:', e.value);
+      if (e.value && e.value.length > 0) {
+        const recognizedText = e.value[0];
+        setText(recognizedText);
+      }
+    };
+
+    Voice.onSpeechError = (e: SpeechErrorEvent) => {
+      console.error('语音识别错误:', e.error);
+      setIsListening(false);
+
+      // 只在非取消的情况下显示错误
+      if (e.error?.code !== '7') {  // 7 是用户取消
+        Alert.alert('语音识别错误', e.error?.message || '识别失败，请重试');
+      }
+    };
+
+    // 清理
+    return () => {
+      Voice.destroy().then(Voice.removeAllListeners);
+    };
+  }, []);
+
   const handleSend = () => {
     if (text.trim() && !isLoading) {
       onSend(text.trim());
@@ -29,46 +67,30 @@ export function ChatInput({ onSend, isLoading = false, enableVoice = true }: Cha
 
   const handleVoiceInput = async () => {
     if (isListening) {
-      setIsListening(false);
+      // 停止识别
+      try {
+        await Voice.stop();
+        setIsListening(false);
+      } catch (error) {
+        console.error('停止语音识别失败:', error);
+      }
       return;
     }
 
     try {
-      setIsListening(true);
-
-      // 使用 Expo Speech 的语音识别功能
-      // 注意：expo-speech 主要是 TTS，STT 需要使用 expo-speech-recognition
-      // 这里我们先使用简单的实现，后续可以替换为完整的语音识别
-
       // 检查语音识别是否可用
-      const isAvailable = await Speech.isSpeakingAsync();
-
+      const isAvailable = await Voice.isAvailable();
       if (!isAvailable) {
-        Alert.alert(
-          '语音输入',
-          '语音功能正在开发中。目前请使用文字输入。',
-          [{ text: '确定' }]
-        );
-        setIsListening(false);
+        Alert.alert('不支持', '您的设备不支持语音识别功能');
         return;
       }
 
-      // 这里可以集成 expo-speech-recognition 或其他语音识别库
-      // 暂时显示提示
-      Alert.alert(
-        '语音输入',
-        '请说话...',
-        [
-          {
-            text: '停止',
-            onPress: () => setIsListening(false)
-          }
-        ]
-      );
-
+      // 开始语音识别（中文）
+      await Voice.start('zh-CN');
+      setIsListening(true);
     } catch (error) {
-      console.error('语音识别错误:', error);
-      Alert.alert('错误', '语音识别暂时不可用');
+      console.error('启动语音识别失败:', error);
+      Alert.alert('错误', '启动语音识别失败，请检查麦克风权限');
       setIsListening(false);
     }
   };
