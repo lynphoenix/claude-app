@@ -20,6 +20,7 @@ export type WSMessageType =
   | 'response'
   | 'responseChunk'
   | 'responseDone'
+  | 'confirmationPrompt'
   | 'historyLoaded'
   | 'error'
   | 'ping'

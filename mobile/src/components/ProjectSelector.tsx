@@ -32,6 +32,14 @@ export function ProjectSelector({
 
   const currentProject = projects.find(p => p.path === currentProjectPath);
 
+  // 为根目录添加特殊显示名称
+  const getProjectDisplayName = (project: ProjectConfig): string => {
+    if (project.path === '/home/ecs-user') {
+      return '🏠 根目录 (管家模式)';
+    }
+    return project.name;
+  };
+
   const handleSelect = (project: ProjectConfig) => {
     onSelectProject(project);
     setVisible(false);
@@ -57,7 +65,7 @@ export function ProjectSelector({
         <View style={styles.textContainer}>
           <Text style={styles.label}>当前项目</Text>
           <Text style={styles.value} numberOfLines={1}>
-            {currentProject?.name || currentProjectPath || '未选择项目'}
+            {currentProject ? getProjectDisplayName(currentProject) : (currentProjectPath || '未选择项目')}
           </Text>
         </View>
         <Ionicons name="chevron-down" size={20} color="#757575" />
@@ -107,7 +115,7 @@ export function ProjectSelector({
                 >
                   <View style={styles.projectInfo}>
                     <Ionicons
-                      name="folder"
+                      name={item.path === '/home/ecs-user' ? 'home-outline' : 'folder'}
                       size={24}
                       color={item.path === currentProjectPath ? '#2196F3' : '#757575'}
                     />
@@ -118,7 +126,7 @@ export function ProjectSelector({
                           item.path === currentProjectPath && styles.selectedText,
                         ]}
                       >
-                        {item.name}
+                        {getProjectDisplayName(item)}
                       </Text>
                       <Text style={styles.projectPath} numberOfLines={1}>
                         {item.path}

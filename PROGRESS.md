@@ -1,6 +1,6 @@
 # Claude Code Mobile App - 开发进展
 
-## 最新状态 (2026-01-26)
+## 最新状态 (2026-01-27)
 
 ### ✅ 已完成功能
 
@@ -28,25 +28,30 @@
    - 各项目独立session
    - 实时获取项目列表：`/api/projects`
 
-#### 移动端 (Mobile v1.0.15)
-1. **消息解析修复** ⚠️ 关键修复
+#### 移动端 (Mobile v1.0.16)
+1. **键盘遮挡修复** ⚠️ 关键修复
+   - 移除KeyboardAvoidingView（与adjustResize冲突）
+   - 完全依赖adjustResize模式
+   - 文件：`mobile/src/screens/ChatScreen.tsx`
+
+2. **消息解析修复** ⚠️ 关键修复
    - 正确解析Claude Code session格式
    - `item.type === 'user'` → `item.message.content`
    - `item.type === 'assistant'` → `item.message.content`
    - 文件：`mobile/src/screens/ChatScreen.tsx` (line 85-131)
 
-2. **懒加载历史**
+3. **懒加载历史**
    - FlatList inverted模式
    - onEndReached触发加载更多
    - 显示"加载中..."提示
    - 文件：`mobile/src/screens/ChatScreen.tsx` (line 405-413, 456-474)
 
-3. **Markdown渲染**
+4. **Markdown渲染**
    - 用户消息：纯文本
    - 助手消息：Markdown格式（代码块、列表等）
    - 文件：`mobile/src/components/ChatMessage.tsx`
 
-4. **项目管理**
+5. **项目管理**
    - 项目列表选择器
    - 创建新项目
    - 切换项目自动加载历史
@@ -54,23 +59,22 @@
 
 ### ❌ 待解决问题
 
-#### 1. 键盘遮挡输入框 (优先级：高)
-- **状态**：已修改为adjustResize模式，但未测试
-- **位置**：`mobile/app.json` line 47
-- **版本**：v1.0.15 (未编译)
-- **备选方案**：
-  - KeyboardAvoidingView的keyboardVerticalOffset调整
-  - 使用react-native-keyboard-aware-scroll-view
-
-#### 2. 需要编译APK v1.0.15 (优先级：高)
-- **原因**：EAS免费额度用完（本月剩余5天）
+#### 1. 需要编译APK v1.0.16 (优先级：高)
+- **状态**: 等待安装 Node.js
+- **环境检查结果**:
+  - ❌ Node.js: 未安装
+  - ❌ npm: 未安装
+  - ✅ Java: 已安装 (1.8.0_45)
+  - ✅ Android Studio: 已安装
+  - ✅ Android SDK: 已安装
+- **安装步骤**:
+  1. 运行 `install-nodejs.bat` 安装便携版 Node.js
+  2. 或访问 https://nodejs.org/ 下载安装 LTS 版本
+  3. 运行 `build-apk.bat` 开始编译
 - **包含修复**：
-  - ✅ 消息解析修复（关键）
-  - ✅ 键盘模式调整
+  - ✅ 键盘遮挡修复（移除冲突的KeyboardAvoidingView）
+  - ✅ 消息解析修复
   - ✅ 分页加载
-- **编译方式**：
-  - EAS: `eas build --platform android --profile preview`
-  - 本地: Android Studio + `npx expo prebuild`
 
 ### 📋 技术细节
 
@@ -156,13 +160,13 @@ cd android
 
 ### 📝 已知问题
 
-1. **消息解析bug (v1.0.13)** ✅ 已修复
+1. **消息解析bug (v1.0.13)** ✅ 已修复 (v1.0.15+)
    - 问题：使用 `item.role` 而不是 `item.type`
-   - 修复：v1.0.15 (待编译)
+   - 修复：使用正确的 `item.type` 解析
 
-2. **键盘遮挡** ⏳ 待测试
-   - v1.0.13: adjustPan (无效)
-   - v1.0.15: adjustResize (待测试)
+2. **键盘遮挡** ✅ 已修复 (v1.0.16)
+   - 问题：KeyboardAvoidingView与adjustResize冲突
+   - 修复：移除KeyboardAvoidingView，完全依赖adjustResize
 
 3. **EAS编译配额** 🚫 本月用完
    - 剩余时间：5天
@@ -171,9 +175,11 @@ cd android
 ### 🎯 下一步计划
 
 #### 立即执行
-- [ ] 使用Android Studio编译v1.0.15 APK
+- [ ] 安装 Node.js (运行 `install-nodejs.bat` 或从官网安装)
+- [ ] 编译 v1.0.16 APK (运行 `build-apk.bat`)
+- [ ] 测试键盘遮挡问题是否解决
 - [ ] 测试历史消息显示
-- [ ] 测试键盘遮挡问题
+- [ ] 测试消息发送和接收
 
 #### 功能增强
 - [ ] 添加语音输入功能测试
@@ -189,6 +195,7 @@ cd android
 
 ### 📦 版本历史
 
+- **v1.0.16** (未编译) - 键盘遮挡修复（移除KeyboardAvoidingView）
 - **v1.0.15** (未编译) - 消息解析修复 + adjustResize
 - **v1.0.14** (已编译) - adjustResize但未修复解析
 - **v1.0.13** (已编译) - adjustPan + 错误的消息解析

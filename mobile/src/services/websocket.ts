@@ -44,10 +44,14 @@ export class ClaudeWebSocketService {
 
           // 发送初始化消息（即使没有项目路径也发送，以获取项目列表）
           if (this.ws) {
-            this.ws.send(JSON.stringify({
-              type: 'init',
-              projectPath: this.projectPath || undefined
-            }));
+            const initMessage: any = {
+              type: 'init'
+            };
+            // 只有当 projectPath 非空时才发送
+            if (this.projectPath) {
+              initMessage.projectPath = this.projectPath;
+            }
+            this.ws.send(JSON.stringify(initMessage));
           }
 
           this.updateStatus('connected');
@@ -148,6 +152,14 @@ export class ClaudeWebSocketService {
     });
   }
 
+  // 发送确认响应
+  sendConfirmResponse(response: string): void {
+    this.send({
+      type: 'confirmResponse',
+      response
+    });
+  }
+
   // 注册消息监听器
   onMessage(callback: MessageCallback): () => void {
     this.messageCallbacks.add(callback);
@@ -174,7 +186,19 @@ export class ClaudeWebSocketService {
 
   // 更新服务器 URL
   updateServerUrl(url: string): void {
-    this.serverUrl = url;
+    if (this.serverUrl !== url) {
+      const wasConnected = this.getStatus() === 'connected';
+      this.serverUrl = url;
+
+      // 如果之前已连接，使用新URL重新连接
+      if (wasConnected) {
+        console.log('服务器URL已更改，重新连接...');
+        this.disconnect();
+        setTimeout(() => {
+          this.connect(this.projectPath).catch(console.error);
+        }, 500);
+      }
+    }
   }
 
   // 清理资源

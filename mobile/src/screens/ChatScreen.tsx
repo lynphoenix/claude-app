@@ -4,10 +4,12 @@ import {
   Text,
   StyleSheet,
   FlatList,
-  KeyboardAvoidingView,
-  Platform,
   TouchableOpacity,
   StatusBar,
+  Platform,
+  KeyboardAvoidingView,
+  Modal,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,6 +36,11 @@ export function ChatScreen() {
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
+  // 确认提示相关状态
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [confirmPrompt, setConfirmPrompt] = useState('');
+  const [confirmMessageId, setConfirmMessageId] = useState('');
+
   const flatListRef = useRef<FlatList>(null);
   const messageIdCounter = useRef(0);
   const pendingMessages = useRef<Map<string, Message>>(new Map());
@@ -47,15 +54,16 @@ export function ChatScreen() {
 
       setServerUrl(settings.serverUrl);
       setEnableTTS(settings.enableTTS);
-      setCurrentProjectPath(settings.currentProjectPath);
+      // 不自动设置项目路径，让用户手动选择（包括根目录选项）
+      // setCurrentProjectPath(settings.currentProjectPath);
       setProjects(settings.projects);
 
       // 更新语音服务配置
       const voice = getVoiceService();
       voice.updateConfig({ enabled: settings.enableTTS });
 
-      // 自动连接以获取项目列表和历史消息
-      connect(settings.currentProjectPath || '');
+      // 连接到服务器但不指定项目，获取项目列表
+      connect('');
     };
 
     init();
@@ -201,6 +209,16 @@ export function ChatScreen() {
 
       case 'messageAck':
         // 消息已确认，开始流式接收
+        break;
+
+      case 'confirmationPrompt':
+        // 处理确认提示
+        console.log('[ChatScreen] 收到确认提示:', wsMessage.prompt);
+        if (wsMessage.prompt) {
+          setConfirmPrompt(wsMessage.prompt);
+          setConfirmMessageId(wsMessage.messageId || '');
+          setShowConfirmDialog(true);
+        }
         break;
 
       case 'responseChunk':
@@ -415,6 +433,15 @@ export function ChatScreen() {
     ws.loadMoreHistory(loadedMessagesCount.current, 20);
   }, [hasMoreHistory, isLoadingMore, connectionStatus, serverUrl]);
 
+  // 处理确认响应
+  const handleConfirmResponse = useCallback((response: string) => {
+    console.log('[ChatScreen] 发送确认响应:', response);
+    const ws = getWebSocketService(serverUrl);
+    ws.sendConfirmResponse(response);
+    setShowConfirmDialog(false);
+    setConfirmPrompt('');
+  }, [serverUrl]);
+
   // 消息历史由服务端的 Claude Code session 管理，客户端不需要保存
 
   // 自动滚动到底部
@@ -427,35 +454,35 @@ export function ChatScreen() {
   }, [messages]);
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-    >
-      <SafeAreaView style={styles.container}>
-        {/* 头部 */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Claude Code</Text>
-          <TouchableOpacity onPress={() => setShowSettings(true)}>
-            <Ionicons name="settings-outline" size={24} color="#757575" />
-          </TouchableOpacity>
-        </View>
+    <SafeAreaView style={styles.container}>
+      {/* 头部 */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Claude Code</Text>
+        <TouchableOpacity onPress={() => setShowSettings(true)}>
+          <Ionicons name="settings-outline" size={24} color="#757575" />
+        </TouchableOpacity>
+      </View>
 
-        {/* 连接状态 */}
-        <ConnectionStatus
-          status={connectionStatus}
-          onReconnect={handleReconnect}
-        />
+      {/* 连接状态 */}
+      <ConnectionStatus
+        status={connectionStatus}
+        onReconnect={handleReconnect}
+      />
 
-        {/* 项目选择器 */}
-        <ProjectSelector
-          projects={projects}
-          currentProjectPath={currentProjectPath}
-          onSelectProject={handleSelectProject}
-          onCreateProject={handleCreateProject}
-        />
+      {/* 项目选择器 */}
+      <ProjectSelector
+        projects={projects}
+        currentProjectPath={currentProjectPath}
+        onSelectProject={handleSelectProject}
+        onCreateProject={handleCreateProject}
+      />
 
-        {/* 消息列表 */}
+      {/* 消息列表和输入框 - 用 KeyboardAvoidingView 包裹 */}
+      <KeyboardAvoidingView
+        style={styles.keyboardContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+      >
         <FlatList
           ref={flatListRef}
           data={messages}
@@ -466,8 +493,7 @@ export function ChatScreen() {
           style={styles.chatList}
           onEndReached={handleLoadMore}
           onEndReachedThreshold={0.1}
-          inverted
-          ListFooterComponent={
+          ListHeaderComponent={
             isLoadingMore ? (
               <View style={{ padding: 10, alignItems: 'center' }}>
                 <Text style={{ color: '#757575' }}>加载中...</Text>
@@ -482,18 +508,47 @@ export function ChatScreen() {
           isLoading={isLoading}
           enableVoice={true}
         />
+      </KeyboardAvoidingView>
 
-        {/* 设置面板 */}
-        <SettingsPanel
-          visible={showSettings}
-          onClose={() => setShowSettings(false)}
-          serverUrl={serverUrl}
-          enableTTS={enableTTS}
-          onSaveServerUrl={handleSaveServerUrl}
-          onToggleTTS={handleToggleTTS}
-        />
-      </SafeAreaView>
-    </KeyboardAvoidingView>
+      {/* 设置面板 */}
+      <SettingsPanel
+        visible={showSettings}
+        onClose={() => setShowSettings(false)}
+        serverUrl={serverUrl}
+        enableTTS={enableTTS}
+        onSaveServerUrl={handleSaveServerUrl}
+        onToggleTTS={handleToggleTTS}
+      />
+
+      {/* 确认对话框 */}
+      <Modal
+        visible={showConfirmDialog}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowConfirmDialog(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.confirmDialog}>
+            <Text style={styles.confirmTitle}>确认操作</Text>
+            <Text style={styles.confirmPrompt}>{confirmPrompt}</Text>
+            <View style={styles.confirmButtons}>
+              <TouchableOpacity
+                style={[styles.confirmButton, styles.confirmButtonNo]}
+                onPress={() => handleConfirmResponse('n')}
+              >
+                <Text style={styles.confirmButtonText}>拒绝</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.confirmButton, styles.confirmButtonYes]}
+                onPress={() => handleConfirmResponse('y')}
+              >
+                <Text style={styles.confirmButtonText}>允许</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
   );
 }
 
@@ -518,11 +573,67 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#212121',
   },
+  keyboardContainer: {
+    flex: 1,
+  },
   chatList: {
     flex: 1,
   },
   messagesList: {
     flexGrow: 1,
     paddingVertical: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  confirmDialog: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
+    width: '100%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  confirmTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#212121',
+    marginBottom: 12,
+  },
+  confirmPrompt: {
+    fontSize: 15,
+    color: '#616161',
+    lineHeight: 22,
+    marginBottom: 20,
+  },
+  confirmButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  confirmButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  confirmButtonYes: {
+    backgroundColor: '#2196F3',
+  },
+  confirmButtonNo: {
+    backgroundColor: '#757575',
+  },
+  confirmButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
 });
