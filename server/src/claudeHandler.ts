@@ -88,8 +88,8 @@ export class ClaudeHandler {
 
     console.log('发送消息到 Claude (project:', this.projectPath, ', session:', this.sessionId, '):', content);
 
-    // 使用 --session-id 指定具体的 session，确保使用同一个会话
-    const command = `source ~/glm.sh && echo "${content.replace(/"/g, '\\"').replace(/\n/g, '\\n')}" | ${claudePath} --session-id ${this.sessionId} --continue -p`;
+    // 使用 --continue 让 Claude 自动管理 session
+    const command = `source ~/glm.sh && echo "${content.replace(/"/g, '\\"').replace(/\n/g, '\\n')}" | ${claudePath} --continue -p`;
 
     const claudeProcess = spawn('bash', ['-c', command], {
       cwd: this.projectPath,
