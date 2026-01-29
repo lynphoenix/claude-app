@@ -240,4 +240,77 @@ export class ClaudeHandler {
     this.sessionFile = path.join(newPath, '.claude-session-id');
     this.loadOrCreateSession();
   }
+
+  /**
+   * 让Claude生成执行计划（不实际执行）
+   * 用于PTY方案：先让用户看到要执行的命令，确认后再执行
+   */
+  async planCommands(
+    userMessage: string
+  ): Promise<{ commands: string[]; explanation: string }> {
+    const claudePath = path.join(os.homedir(), '.local/bin/claude');
+
+    // 构造提示词，让Claude只生成命令，不执行
+    const prompt = `用户需求: ${userMessage}
+
+请分析这个需求，并生成需要执行的bash命令。
+
+要求：
+1. 只返回命令列表，不要实际执行
+2. 每个命令单独一行
+3. 用JSON格式返回：{"commands": ["cmd1", "cmd2"], "explanation": "说明"}
+
+请直接返回JSON，不要有其他内容。`;
+
+    console.log('[Plan] 请求Claude生成执行计划');
+
+    return new Promise((resolve, reject) => {
+      const command = `source ~/glm.sh && echo "${prompt.replace(/"/g, '\\"').replace(/\n/g, '\\n')}" | ${claudePath} --continue -p`;
+
+      const claudeProcess = spawn('bash', ['-c', command], {
+        cwd: this.projectPath,
+        env: {
+          ...process.env,
+          PATH: process.env.PATH + ':' + path.join(os.homedir(), '.local/bin'),
+        },
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      let fullResponse = '';
+
+      claudeProcess.stdout?.on('data', (data: Buffer) => {
+        fullResponse += data.toString();
+      });
+
+      claudeProcess.on('close', (code: number | null) => {
+        if (code === 0) {
+          try {
+            // 尝试解析JSON响应
+            const jsonMatch = fullResponse.match(/\{[\s\S]*"commands"[\s\S]*\}/);
+            if (jsonMatch) {
+              const result = JSON.parse(jsonMatch[0]);
+              console.log('[Plan] 生成的命令:', result.commands);
+              resolve(result);
+            } else {
+              // 如果没有JSON格式，尝试简单解析
+              console.log('[Plan] 未找到JSON，使用原始响应');
+              resolve({
+                commands: [],
+                explanation: fullResponse.trim()
+              });
+            }
+          } catch (error) {
+            console.error('[Plan] 解析失败:', error);
+            reject(new Error('无法解析Claude的响应'));
+          }
+        } else {
+          reject(new Error(`Claude进程退出异常，代码: ${code}`));
+        }
+      });
+
+      claudeProcess.on('error', (error: Error) => {
+        reject(error);
+      });
+    });
+  }
 }

@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { ClaudeHandler } from './claudeHandler.js';
+import { PTYManager } from './ptyManager.js';
 
 dotenv.config();
 
@@ -67,6 +68,9 @@ app.post('/api/projects', express.json(), (req, res) => {
 
 // 创建 WebSocket 服务器
 const wss = new WebSocketServer({ server, path: '/ws' });
+
+// 存储客户端连接和PTY管理器
+const ptyManagers = new Map<WebSocket, PTYManager>();
 
 // 存储客户端连接
 const clients = new Map<WebSocket, ClaudeHandler>();
@@ -222,6 +226,90 @@ wss.on('connection', (ws: WebSocket) => {
           );
           break;
 
+        case 'planCommands':
+          // PTY模式：让Claude生成执行计划
+          const planHandler = clients.get(ws);
+          if (!planHandler) {
+            ws.send(JSON.stringify({
+              type: 'error',
+              message: '请先初始化连接'
+            }));
+            break;
+          }
+
+          try {
+            const plan = await planHandler.planCommands(message.content);
+            ws.send(JSON.stringify({
+              type: 'commandPlan',
+              commands: plan.commands,
+              explanation: plan.explanation,
+              messageId: message.id
+            }));
+          } catch (error: any) {
+            ws.send(JSON.stringify({
+              type: 'error',
+              message: `生成执行计划失败: ${error.message}`
+            }));
+          }
+          break;
+
+        case 'executeCommands':
+          // PTY模式：用户确认后执行命令
+          const execHandler = clients.get(ws);
+          if (!execHandler) {
+            ws.send(JSON.stringify({
+              type: 'error',
+              message: '请先初始化连接'
+            }));
+            break;
+          }
+
+          // 获取或创建PTY
+          let ptyManager = ptyManagers.get(ws);
+          if (!ptyManager) {
+            const sessionId = execHandler.getSessionId() || 'default';
+            const projectPath = message.projectPath || '/home/ecs-user/code';
+            ptyManager = new PTYManager(sessionId, projectPath);
+            ptyManager.createPTY();
+            ptyManagers.set(ws, ptyManager);
+
+            // 监听PTY输出
+            ptyManager.onData((data) => {
+              ws.send(JSON.stringify({
+                type: 'terminalOutput',
+                data: data
+              }));
+            });
+
+            ptyManager.onExit((exitCode) => {
+              ws.send(JSON.stringify({
+                type: 'terminalExit',
+                exitCode: exitCode
+              }));
+              ptyManagers.delete(ws);
+            });
+          }
+
+          // 执行命令
+          const commands = message.commands || [];
+          for (const cmd of commands) {
+            ptyManager.executeCommand(cmd);
+          }
+
+          ws.send(JSON.stringify({
+            type: 'commandsExecuting',
+            messageId: message.id
+          }));
+          break;
+
+        case 'terminalInput':
+          // 用户在终端输入（如密码、确认等）
+          const inputPty = ptyManagers.get(ws);
+          if (inputPty) {
+            inputPty.sendInput(message.input);
+          }
+          break;
+
         case 'ping':
           ws.send(JSON.stringify({ type: 'pong' }));
           break;
@@ -244,6 +332,13 @@ wss.on('connection', (ws: WebSocket) => {
   ws.on('close', () => {
     console.log('客户端断开连接');
     const handler = clients.get(ws);
+
+    // 清理PTY
+    const ptyManager = ptyManagers.get(ws);
+    if (ptyManager) {
+      ptyManager.destroy();
+      ptyManagers.delete(ws);
+    }
     if (handler) {
       handler.dispose();
       clients.delete(ws);
