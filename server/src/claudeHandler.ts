@@ -89,8 +89,8 @@ export class ClaudeHandler {
     console.log('发送消息到 Claude (project:', this.projectPath, ', session:', this.sessionId, '):', content);
 
     // 使用 --continue 让 Claude 自动管理 session
-    // 使用 --permission-mode=dontAsk 自动执行所有操作，适合移动端服务端场景
-    const command = `source ~/glm.sh && echo "${content.replace(/"/g, '\\"').replace(/\n/g, '\\n')}" | ${claudePath} --continue -p --permission-mode=dontAsk`;
+    // 使用 --dangerously-skip-permissions 跳过所有权限检查，适合可信的服务端环境
+    const command = `source ~/glm.sh && echo "${content.replace(/"/g, '\\"').replace(/\n/g, '\\n')}" | ${claudePath} --continue -p --dangerously-skip-permissions`;
 
     const claudeProcess = spawn('bash', ['-c', command], {
       cwd: this.projectPath,
