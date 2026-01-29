@@ -88,7 +88,9 @@ wss.on('connection', (ws: WebSocket) => {
       switch (message.type) {
         case 'init':
           // 初始化 Claude 处理器
-          const projectPath = message.projectPath || process.env.DEFAULT_PROJECT_PATH;
+          // 默认使用 /home/ecs-user/code 作为"管家"目录
+          const defaultPath = '/home/ecs-user/code';
+          const projectPath = message.projectPath || defaultPath;
           const handler = new ClaudeHandler(projectPath);
 
           // 发送可用的项目列表

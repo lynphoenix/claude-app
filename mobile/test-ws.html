@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test</title>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        button { padding: 10px 20px; font-size: 16px; margin: 5px; }
+        #log { background: #f5f5f5; padding: 10px; max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <h2>WebSocket连接测试</h2>
+
+    <div id="status" class="status info">准备测试...</div>
+
+    <button onclick="testConnection()">测试连接</button>
+    <button onclick="clearLog()">清空日志</button>
+
+    <h3>日志：</h3>
+    <div id="log"></div>
+
+    <script>
+        let ws = null;
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            const color = type === 'error' ? 'red' : type === 'success' ? 'green' : 'blue';
+            logDiv.innerHTML += `<div style="color: ${color}">[${time}] ${message}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function updateStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = 'status ' + type;
+        }
+
+        function testConnection() {
+            if (ws) {
+                ws.close();
+            }
+
+            const wsUrl = 'ws://47.99.75.219:3001/ws';
+            log('正在连接到: ' + wsUrl);
+            updateStatus('正在连接...', 'info');
+
+            try {
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = function() {
+                    log('✅ WebSocket连接成功！', 'success');
+                    updateStatus('✅ 连接成功', 'success');
+
+                    // 发送初始化消息
+                    const initMsg = JSON.stringify({ type: 'init', projectPath: '' });
+                    ws.send(initMsg);
+                    log('发送初始化消息: ' + initMsg);
+                };
+
+                ws.onmessage = function(event) {
+                    log('📨 收到消息: ' + event.data, 'success');
+
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type === 'projects') {
+                            log('📁 项目列表: ' + JSON.stringify(data.projects), 'success');
+                        }
+                    } catch (e) {
+                        log('解析消息失败: ' + e.message, 'error');
+                    }
+                };
+
+                ws.onerror = function(error) {
+                    log('❌ 连接错误: ' + JSON.stringify(error), 'error');
+                    updateStatus('❌ 连接失败', 'error');
+                };
+
+                ws.onclose = function() {
+                    log('🔌 连接已关闭');
+                    updateStatus('连接已关闭', 'info');
+                };
+
+            } catch (e) {
+                log('❌ 异常: ' + e.message, 'error');
+                updateStatus('❌ 测试失败', 'error');
+            }
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+
+        // 页面加载后自动测试
+        window.onload = function() {
+            log('页面已加载，点击"测试连接"按钮开始测试');
+        };
+    </script>
+</body>
+</html>
