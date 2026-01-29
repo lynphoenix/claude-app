@@ -88,9 +88,33 @@ export class ClaudeHandler {
 
     console.log('发送消息到 Claude (project:', this.projectPath, ', session:', this.sessionId, '):', content);
 
+    // 检查用户消息中是否包含危险关键词
+    const dangerousPatterns = [
+      /\brm\s+-rf\b/i,
+      /\bkill\s+-9/i,
+      /\bpkill\b/i,
+      /\bkillall\b/i,
+      /\bshutdown\b/i,
+      /\breboot\b/i,
+      /\bdd\s+if=/i,
+      /\bmkfs\b/i,
+      /\bformat\b/i,
+      /\b:(){:|:&};:\b/i, // fork bomb
+    ];
+
+    const containsDangerousPattern = dangerousPatterns.some(pattern => pattern.test(content));
+
+    if (containsDangerousPattern) {
+      console.warn('检测到潜在危险操作，使用 acceptEdits 模式');
+    }
+
+    // 根据消息内容选择权限模式
+    // 如果检测到危险操作，使用 acceptEdits（只自动接受文件编辑）
+    // 否则使用 dontAsk（自动执行所有操作）
+    const permissionMode = containsDangerousPattern ? 'acceptEdits' : 'dontAsk';
+
     // 使用 --continue 让 Claude 自动管理 session
-    // 使用 --dangerously-skip-permissions 跳过所有权限检查，适合可信的服务端环境
-    const command = `source ~/glm.sh && echo "${content.replace(/"/g, '\\"').replace(/\n/g, '\\n')}" | ${claudePath} --continue -p --dangerously-skip-permissions`;
+    const command = `source ~/glm.sh && echo "${content.replace(/"/g, '\\"').replace(/\n/g, '\\n')}" | ${claudePath} --continue -p --permission-mode=${permissionMode}`;
 
     const claudeProcess = spawn('bash', ['-c', command], {
       cwd: this.projectPath,
