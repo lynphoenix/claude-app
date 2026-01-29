@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Alert,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -40,6 +41,16 @@ export function ChatScreen() {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [confirmPrompt, setConfirmPrompt] = useState('');
   const [confirmMessageId, setConfirmMessageId] = useState('');
+
+  // PTY命令确认相关状态
+  const [showCommandDialog, setShowCommandDialog] = useState(false);
+  const [commandPlan, setCommandPlan] = useState<{
+    commands: string[];
+    explanation: string;
+    messageId: string;
+  } | null>(null);
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [terminalOutput, setTerminalOutput] = useState('');
 
   const flatListRef = useRef<FlatList>(null);
   const messageIdCounter = useRef(0);
@@ -258,6 +269,53 @@ export function ChatScreen() {
         }
         break;
 
+      case 'commandPlan':
+        // PTY模式：收到Claude生成的命令计划
+        console.log('[ChatScreen] 收到命令计划:', wsMessage.commands);
+        setIsLoading(false);
+        if (wsMessage.commands && wsMessage.commands.length > 0) {
+          setCommandPlan({
+            commands: wsMessage.commands,
+            explanation: wsMessage.explanation || '',
+            messageId: wsMessage.messageId || ''
+          });
+          setShowCommandDialog(true);
+        } else {
+          // 没有命令，显示说明
+          addAssistantMessage(wsMessage.explanation || '无需执行命令');
+        }
+        break;
+
+      case 'commandsExecuting':
+        // 命令开始执行
+        console.log('[ChatScreen] 命令开始执行');
+        setShowCommandDialog(false);
+        // 显示终端输出区域
+        setShowTerminal(true);
+        setTerminalOutput('');
+        break;
+
+      case 'terminalOutput':
+        // 实时终端输出
+        if (wsMessage.data) {
+          // 过滤ANSI转义序列，保留可读文本
+          const cleanData = wsMessage.data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+          setTerminalOutput(prev => prev + cleanData);
+        }
+        break;
+
+      case 'terminalExit':
+        // 终端进程退出
+        console.log('[ChatScreen] 终端退出，代码:', wsMessage.exitCode);
+        setTimeout(() => {
+          setShowTerminal(false);
+          // 将终端输出作为助手消息添加
+          if (terminalOutput.trim()) {
+            addAssistantMessage(`执行完成\n\n\`\`\`\n${terminalOutput.trim()}\n\`\`\``);
+          }
+        }, 2000);
+        break;
+
       case 'error':
         setIsLoading(false);
         addErrorMessage(wsMessage.message || '发生错误');
@@ -348,7 +406,12 @@ export function ChatScreen() {
     setIsLoading(true);
 
     const ws = getWebSocketService(serverUrl);
-    ws.sendMessage(text, messageId);
+    // 使用PTY模式：先让Claude生成执行计划
+    ws.send(JSON.stringify({
+      type: 'planCommands',
+      id: messageId,
+      content: text
+    }));
   }, [connectionStatus, serverUrl]);
 
   // 重新连接
@@ -366,6 +429,27 @@ export function ChatScreen() {
     const ws = getWebSocketService(serverUrl);
     ws.changeProject(project.path);
   }, [serverUrl]);
+
+  // 执行命令（用户确认后）
+  const handleExecuteCommands = useCallback((commands: string[]) => {
+    console.log('[ChatScreen] 执行命令:', commands);
+    const ws = getWebSocketService(serverUrl);
+    ws.send(JSON.stringify({
+      type: 'executeCommands',
+      id: `exec-${Date.now()}`,
+      commands: commands,
+      projectPath: currentProjectPath
+    }));
+  }, [serverUrl, currentProjectPath]);
+
+  // 取消执行命令
+  const handleCancelCommands = useCallback(() => {
+    console.log('[ChatScreen] 取消执行命令');
+    setShowCommandDialog(false);
+    setCommandPlan(null);
+    setIsLoading(false);
+    addSystemMessage('已取消执行');
+  }, []);
 
   // 创建新项目
   const handleCreateProject = useCallback(async (name: string) => {
@@ -520,6 +604,80 @@ export function ChatScreen() {
         onToggleTTS={handleToggleTTS}
       />
 
+      {/* 命令预览对话框 */}
+      <Modal
+        visible={showCommandDialog}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={handleCancelCommands}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.commandDialog}>
+            <Text style={styles.commandTitle}>Claude 建议执行</Text>
+
+            {/* 命令列表 */}
+            <ScrollView style={styles.commandList}>
+              {commandPlan?.commands.map((cmd, index) => (
+                <View key={index} style={styles.commandItem}>
+                  <Text style={styles.commandIndex}>{index + 1}.</Text>
+                  <Text style={styles.commandText}>{cmd}</Text>
+                </View>
+              ))}
+            </ScrollView>
+
+            {/* 说明 */}
+            {commandPlan?.explanation && (
+              <View style={styles.explanationBox}>
+                <Text style={styles.explanationLabel}>说明：</Text>
+                <Text style={styles.explanationText}>{commandPlan.explanation}</Text>
+              </View>
+            )}
+
+            {/* 按钮 */}
+            <View style={styles.commandButtons}>
+              <TouchableOpacity
+                style={[styles.commandButton, styles.cancelButton]}
+                onPress={handleCancelCommands}
+              >
+                <Text style={styles.cancelButtonText}>取消</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.commandButton, styles.executeButton]}
+                onPress={() => {
+                  if (commandPlan) {
+                    handleExecuteCommands(commandPlan.commands);
+                  }
+                }}
+              >
+                <Text style={styles.executeButtonText}>执行</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 终端输出 */}
+      <Modal
+        visible={showTerminal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowTerminal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.terminalDialog}>
+            <View style={styles.terminalHeader}>
+              <Text style={styles.terminalTitle}>执行中...</Text>
+              <TouchableOpacity onPress={() => setShowTerminal(false)}>
+                <Ionicons name="close" size={24} color="#757575" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.terminalContent}>
+              <Text style={styles.terminalText}>{terminalOutput}</Text>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* 确认对话框 */}
       <Modal
         visible={showConfirmDialog}
@@ -635,5 +793,116 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  // 命令预览对话框样式
+  commandDialog: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    width: '90%',
+    maxHeight: '80%',
+  },
+  commandTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#212121',
+    marginBottom: 16,
+  },
+  commandList: {
+    maxHeight: 200,
+    marginBottom: 16,
+  },
+  commandItem: {
+    flexDirection: 'row',
+    marginBottom: 12,
+    backgroundColor: '#F5F5F5',
+    padding: 12,
+    borderRadius: 8,
+  },
+  commandIndex: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2196F3',
+    marginRight: 8,
+    minWidth: 20,
+  },
+  commandText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#212121',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  explanationBox: {
+    backgroundColor: '#E3F2FD',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  explanationLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1976D2',
+    marginBottom: 4,
+  },
+  explanationText: {
+    fontSize: 13,
+    color: '#424242',
+    lineHeight: 18,
+  },
+  commandButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  commandButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  cancelButton: {
+    backgroundColor: '#E0E0E0',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#616161',
+  },
+  executeButton: {
+    backgroundColor: '#4CAF50',
+  },
+  executeButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  // 终端输出样式
+  terminalDialog: {
+    backgroundColor: '#1E1E1E',
+    borderRadius: 16,
+    width: '90%',
+    maxHeight: '70%',
+    overflow: 'hidden',
+  },
+  terminalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  terminalTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#E0E0E0',
+  },
+  terminalContent: {
+    padding: 16,
+  },
+  terminalText: {
+    fontSize: 13,
+    color: '#00FF00',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    lineHeight: 18,
   },
 });

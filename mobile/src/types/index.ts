@@ -21,6 +21,10 @@ export type WSMessageType =
   | 'responseChunk'
   | 'responseDone'
   | 'confirmationPrompt'
+  | 'commandPlan'
+  | 'commandsExecuting'
+  | 'terminalOutput'
+  | 'terminalExit'
   | 'historyLoaded'
   | 'error'
   | 'ping'
@@ -40,6 +44,12 @@ export interface WSMessage {
   totalMessages?: number; // 总消息数
   offset?: number; // 当前偏移量
   hasMore?: boolean; // 是否还有更多（用于 historyLoaded）
+  // PTY相关字段
+  commands?: string[]; // 命令列表
+  explanation?: string; // 命令说明
+  data?: string; // 终端输出数据
+  exitCode?: number; // 进程退出代码
+  prompt?: string; // 确认提示
 }
 
 // 项目配置接口
