@@ -59,6 +59,7 @@ export class ClaudeManager {
       '--replay-user-messages'
     ];
 
+    console.log(`🔍 DEBUG: About to spawn Claude with path: ${this.claudePath}`);
     const claudeProcess = spawn(this.claudePath, args, {
       cwd: projectPath,
       stdio: ['pipe', 'pipe', 'pipe']

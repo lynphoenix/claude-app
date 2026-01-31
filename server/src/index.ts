@@ -109,7 +109,7 @@ wss.on('connection', (ws: WebSocket) => {
 
           console.log(`📤 Routing message to desktop (session: ${message.sessionId})`);
 
-          const sent = deviceManager.sendToDesktop(message.sessionId, {
+          let sent = deviceManager.sendToDesktop(message.sessionId, {
             type: 'user-message',
             data: {
               sessionId: message.sessionId,
@@ -118,6 +118,29 @@ wss.on('connection', (ws: WebSocket) => {
               encrypted: message.encrypted || false
             }
           });
+
+          // Auto-bind desktop if not already bound
+          if (!sent) {
+            const availableDesktops = Array.from(deviceManager['devices'].values())
+              .filter(d => d.type === 'desktop');
+
+            if (availableDesktops.length > 0) {
+              const desktop = availableDesktops[0];
+              console.log(`📎 Auto-binding desktop ${desktop.id} to session ${message.sessionId}`);
+              deviceManager.setDeviceSession(desktop.id, message.sessionId);
+
+              // Retry sending
+              sent = deviceManager.sendToDesktop(message.sessionId, {
+                type: 'user-message',
+                data: {
+                  sessionId: message.sessionId,
+                  content: message.content,
+                  projectPath: message.projectPath,
+                  encrypted: message.encrypted || false
+                }
+              });
+            }
+          }
 
           if (sent) {
             // Acknowledge receipt
@@ -149,6 +172,23 @@ wss.on('connection', (ws: WebSocket) => {
             content: message.data.content,
             encrypted: message.data.encrypted || false,
             messageId: message.messageId
+          });
+          break;
+
+        // ================================================================
+        // Response Done (Desktop → Mobile)
+        // ================================================================
+        case 'response-done':
+          if (!deviceId) {
+            console.error('❌ Device not registered');
+            break;
+          }
+
+          console.log(`✅ Broadcasting response done to mobiles (session: ${message.sessionId})`);
+
+          deviceManager.broadcastToMobiles(message.sessionId, {
+            type: 'responseDone',
+            sessionId: message.sessionId
           });
           break;
 

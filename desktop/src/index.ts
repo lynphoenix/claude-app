@@ -116,6 +116,12 @@ async function main() {
     // onSessionEnd callback
     (sessionId, result) => {
       console.log(`✅ Session ended: ${sessionId}`, result);
+
+      // 通知Server响应已完成
+      wsClient.send({
+        type: 'response-done',
+        sessionId: sessionId
+      });
     }
   );
 
