@@ -406,12 +406,8 @@ export function ChatScreen() {
     setIsLoading(true);
 
     const ws = getWebSocketService(serverUrl);
-    // 使用普通消息模式，让Claude正常对话
-    ws.send({
-      type: 'message',
-      id: messageId,
-      content: text
-    });
+    // 使用sendMessage方法，会自动添加sessionId
+    ws.sendMessage(text, messageId);
   }, [connectionStatus, serverUrl]);
 
   // 重新连接
