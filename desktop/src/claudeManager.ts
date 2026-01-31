@@ -51,10 +51,12 @@ export class ClaudeManager {
     console.log(`   Project path: ${projectPath}`);
 
     const args = [
+      '--print',
+      '--verbose',
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--permission-prompt-tool', 'stdio',
-      '--continue'
+      '--replay-user-messages'
     ];
 
     const claudeProcess = spawn(this.claudePath, args, {

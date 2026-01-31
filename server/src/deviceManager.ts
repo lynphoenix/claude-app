@@ -81,11 +81,29 @@ export class DeviceManager {
   }
 
   /**
-   * Get desktop client for a session
+   * Get desktop client for a session (or any available desktop)
    */
   getDesktopForSession(sessionId: string): Device | undefined {
+    // First try to find desktop already in this session
     const devices = this.getDevicesInSession(sessionId);
-    return devices.find(device => device.type === 'desktop');
+    const desktop = devices.find(device => device.type === 'desktop');
+
+    if (desktop) {
+      return desktop;
+    }
+
+    // If no desktop in session, find any available desktop and bind it
+    const availableDesktop = Array.from(this.devices.values()).find(
+      device => device.type === 'desktop' && !device.sessionId
+    );
+
+    if (availableDesktop) {
+      console.log(`📎 Auto-binding desktop ${availableDesktop.id} to session ${sessionId}`);
+      this.setDeviceSession(availableDesktop.id, sessionId);
+      return availableDesktop;
+    }
+
+    return undefined;
   }
 
   /**

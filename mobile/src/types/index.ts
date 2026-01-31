@@ -13,6 +13,7 @@ export interface Message {
 // WebSocket 消息类型
 export type WSMessageType =
   | 'connected'
+  | 'registered' // 新增：设备注册成功
   | 'ready'
   | 'projects'
   | 'projectChanged'
@@ -20,6 +21,7 @@ export type WSMessageType =
   | 'response'
   | 'responseChunk'
   | 'responseDone'
+  | 'permissionRequest' // 新增：权限请求
   | 'confirmationPrompt'
   | 'commandPlan'
   | 'commandsExecuting'
@@ -50,6 +52,10 @@ export interface WSMessage {
   data?: string; // 终端输出数据
   exitCode?: number; // 进程退出代码
   prompt?: string; // 确认提示
+  // 新增：权限请求相关字段
+  requestId?: string; // 权限请求ID
+  toolName?: string; // 工具名称
+  input?: any; // 工具输入参数
 }
 
 // 项目配置接口

@@ -11,6 +11,10 @@ const READY_STATES = {
   CLOSED: 3
 };
 
+/**
+ * Claude WebSocket Service
+ * 适配新的Server消息路由架构
+ */
 export class ClaudeWebSocketService {
   private ws: any = null;
   private serverUrl: string;
@@ -22,8 +26,31 @@ export class ClaudeWebSocketService {
   private currentStatus: ConnectionStatus = 'disconnected';
   private projectPath: string = '';
 
+  // 新增：设备和会话管理
+  private deviceId: string;
+  private sessionId: string | null = null;
+  private isRegistered: boolean = false;
+
   constructor(serverUrl: string) {
     this.serverUrl = serverUrl;
+    // 生成唯一设备ID（持久化存储可后续优化）
+    this.deviceId = this.generateDeviceId();
+  }
+
+  // 生成设备ID
+  private generateDeviceId(): string {
+    // TODO: 从AsyncStorage读取持久化的deviceId
+    return `mobile-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  // 生成会话ID
+  private generateSessionId(): string {
+    const buffer = new Uint8Array(16);
+    // React Native环境下的随机数生成
+    for (let i = 0; i < 16; i++) {
+      buffer[i] = Math.floor(Math.random() * 256);
+    }
+    return Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
   // 连接到服务器
@@ -42,19 +69,9 @@ export class ClaudeWebSocketService {
           console.log('WebSocket 连接成功');
           this.reconnectAttempts = 0;
 
-          // 发送初始化消息（即使没有项目路径也发送，以获取项目列表）
-          if (this.ws) {
-            const initMessage: any = {
-              type: 'init'
-            };
-            // 只有当 projectPath 非空时才发送
-            if (this.projectPath) {
-              initMessage.projectPath = this.projectPath;
-            }
-            this.ws.send(JSON.stringify(initMessage));
-          }
+          // Step 1: 注册为mobile设备
+          this.registerDevice();
 
-          this.updateStatus('connected');
           resolve();
         };
 
@@ -64,14 +81,7 @@ export class ClaudeWebSocketService {
             console.log('收到消息:', message);
 
             // 处理不同类型的消息
-            switch (message.type) {
-              case 'ready':
-                this.updateStatus('connected');
-                break;
-              case 'error':
-                console.error('服务器错误:', message.message);
-                break;
-            }
+            this.handleMessage(message);
 
             // 通知所有监听器
             this.messageCallbacks.forEach(callback => callback(message));
@@ -88,6 +98,8 @@ export class ClaudeWebSocketService {
 
         this.ws.onclose = () => {
           console.log('WebSocket 连接关闭');
+          this.isRegistered = false;
+          this.sessionId = null;
           this.updateStatus('disconnected');
 
           // 尝试重新连接
@@ -106,6 +118,84 @@ export class ClaudeWebSocketService {
     });
   }
 
+  // 注册设备
+  private registerDevice(): void {
+    console.log('注册mobile设备:', this.deviceId);
+    this.send({
+      type: 'register',
+      deviceId: this.deviceId,
+      deviceType: 'mobile'
+    });
+  }
+
+  // 初始化会话
+  private initializeSession(): void {
+    if (!this.sessionId) {
+      this.sessionId = this.generateSessionId();
+    }
+
+    console.log('初始化会话:', this.sessionId);
+    this.send({
+      type: 'init',
+      sessionId: this.sessionId
+    });
+  }
+
+  // 处理服务器消息
+  private handleMessage(message: WSMessage): void {
+    switch (message.type) {
+      case 'registered':
+        console.log('✅ 设备注册成功');
+        this.isRegistered = true;
+        this.updateStatus('connected');
+
+        // Step 2: 初始化会话
+        this.initializeSession();
+        break;
+
+      case 'ready':
+        console.log('✅ 会话已就绪');
+        // 会话准备完成，可以开始发送消息
+        break;
+
+      case 'messageAck':
+        console.log('✅ 消息已送达');
+        break;
+
+      case 'responseChunk':
+        // Claude的响应chunk，交给UI层处理
+        break;
+
+      case 'permissionRequest':
+        // 权限请求，自动批准或提示用户
+        this.handlePermissionRequest(message);
+        break;
+
+      case 'error':
+        console.error('服务器错误:', message.message);
+        break;
+
+      default:
+        console.log('未处理的消息类型:', message.type);
+    }
+  }
+
+  // 处理权限请求
+  private handlePermissionRequest(message: WSMessage): void {
+    console.log('🔐 收到权限请求:', message);
+
+    // TODO: 可以弹出UI让用户确认，这里暂时自动批准
+    const shouldApprove = true; // 可配置为询问用户
+
+    this.send({
+      type: 'permission-response',
+      sessionId: this.sessionId,
+      requestId: message.id,
+      approved: shouldApprove,
+      reason: shouldApprove ? 'Auto approved by mobile app' : 'User denied'
+    });
+  }
+
   // 断开连接
   disconnect(): void {
     if (this.ws) {
@@ -113,11 +203,13 @@ export class ClaudeWebSocketService {
       this.ws = null;
     }
     this.reconnectAttempts = this.maxReconnectAttempts;
+    this.isRegistered = false;
+    this.sessionId = null;
     this.updateStatus('disconnected');
   }
 
-  // 发送消息
-  send(message: any): void {
+  // 发送消息（底层）
+  private send(message: any): void {
     if (this.ws && this.ws.readyState === READY_STATES.OPEN) {
       this.ws.send(JSON.stringify(message));
     } else {
@@ -127,33 +219,38 @@ export class ClaudeWebSocketService {
 
   // 发送用户消息
   sendMessage(content: string, messageId: string): void {
+    if (!this.isRegistered || !this.sessionId) {
+      console.error('设备未注册或会话未初始化');
+      return;
+    }
+
     this.send({
       type: 'message',
+      id: messageId,
+      sessionId: this.sessionId,
       content,
-      id: messageId
+      projectPath: this.projectPath || '/tmp/mobile-project'
     });
   }
 
   // 切换项目
   changeProject(projectPath: string): void {
     this.projectPath = projectPath;
-    this.send({
-      type: 'changeProject',
-      projectPath
-    });
+
+    // 切换项目时重新初始化会话
+    this.initializeSession();
   }
 
   // 加载更多历史消息
   loadMoreHistory(offset: number, limit: number = 20): void {
-    this.send({
-      type: 'loadMoreHistory',
-      offset,
-      limit
-    });
+    // TODO: 新架构下history由Desktop Client管理
+    // 可能需要新的消息类型或从Server查询
+    console.warn('loadMoreHistory: 新架构下需要实现');
   }
 
   // 发送确认响应
   sendConfirmResponse(response: string): void {
+    // TODO: 适配新的permission-response格式
     this.send({
       type: 'confirmResponse',
       response
@@ -182,6 +279,16 @@ export class ClaudeWebSocketService {
   // 获取当前状态
   getStatus(): ConnectionStatus {
     return this.currentStatus;
+  }
+
+  // 获取会话ID
+  getSessionId(): string | null {
+    return this.sessionId;
+  }
+
+  // 获取设备ID
+  getDeviceId(): string {
+    return this.deviceId;
   }
 
   // 更新服务器 URL

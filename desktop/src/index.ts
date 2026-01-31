@@ -8,13 +8,14 @@ import { loadConfig, validateConfig, printConfig } from './config.js';
 import { ClaudeManager } from './claudeManager.js';
 import { WSClient } from './wsClient.js';
 import { SessionSync } from './sessionSync.js';
-import {
-  generateKeyPair,
-  keyPairToStrings,
-  keyPairFromStrings,
-  encrypt,
-  decrypt
-} from './encryption.js';
+// Temporarily disabled for testing
+// import {
+//   generateKeyPair,
+//   keyPairToStrings,
+//   keyPairFromStrings,
+//   encrypt,
+//   decrypt
+// } from './encryption.js';
 import type {
   UserMessageFromServer,
   PermissionResponseFromServer,
@@ -43,32 +44,12 @@ async function main() {
   console.log();
 
   // Initialize encryption keys
-  let keyPair: KeyPair | undefined;
+  let keyPair: any | undefined; // KeyPair | undefined;
   let serverPublicKey: Uint8Array | undefined;
 
   if (config.encryption?.enabled) {
-    console.log('🔐 Initializing encryption...');
-
-    const keyPath = join(homedir(), '.claude-desktop-keys.json');
-
-    if (existsSync(keyPath)) {
-      console.log('   Loading existing keys from:', keyPath);
-      const keysJson = JSON.parse(readFileSync(keyPath, 'utf-8'));
-      keyPair = keyPairFromStrings(keysJson);
-    } else if (config.encryption.privateKey && config.encryption.publicKey) {
-      console.log('   Loading keys from config');
-      keyPair = keyPairFromStrings({
-        privateKey: config.encryption.privateKey,
-        publicKey: config.encryption.publicKey
-      });
-    } else {
-      console.log('   Generating new key pair...');
-      keyPair = generateKeyPair();
-      const keysString = keyPairToStrings(keyPair);
-      writeFileSync(keyPath, JSON.stringify(keysString, null, 2));
-      console.log('   Keys saved to:', keyPath);
-      console.log('   Public key:', keysString.publicKey);
-    }
+    console.log('⚠️  Encryption temporarily disabled for testing');
+    // Encryption code disabled
   }
 
   // Initialize session sync
@@ -95,15 +76,16 @@ async function main() {
       let encrypted = false;
       let encryptedContent = content;
 
-      if (keyPair && serverPublicKey) {
-        try {
-          const encryptedData = encrypt(content, serverPublicKey, keyPair.privateKey);
-          encryptedContent = JSON.stringify(encryptedData);
-          encrypted = true;
-        } catch (e) {
-          console.error('❌ Encryption failed:', e);
-        }
-      }
+      // Encryption temporarily disabled
+      // if (keyPair && serverPublicKey) {
+      //   try {
+      //     const encryptedData = encrypt(content, serverPublicKey, keyPair.privateKey);
+      //     encryptedContent = JSON.stringify(encryptedData);
+      //     encrypted = true;
+      //   } catch (e) {
+      //     console.error('❌ Encryption failed:', e);
+      //   }
+      // }
 
       // Send to server
       wsClient.sendOutputChunk(sessionId, encryptedContent, encrypted);
