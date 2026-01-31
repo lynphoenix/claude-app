@@ -251,16 +251,27 @@ export class ClaudeHandler {
     const claudePath = path.join(os.homedir(), '.local/bin/claude');
 
     // 构造提示词，让Claude只生成命令，不执行
-    const prompt = `用户需求: ${userMessage}
+    const prompt = `<task>
+分析用户需求并生成bash命令列表。
 
-请分析这个需求，并生成需要执行的bash命令。
+用户需求: ${userMessage}
 
-要求：
-1. 只返回命令列表，不要实际执行
-2. 每个命令单独一行
-3. 用JSON格式返回：{"commands": ["cmd1", "cmd2"], "explanation": "说明"}
+你必须以JSON格式回复，不要有任何其他文字、解释或markdown代码块。
 
-请直接返回JSON，不要有其他内容。`;
+JSON格式：
+{"commands": ["命令1", "命令2"], "explanation": "简短说明"}
+
+示例1 - 查看文件：
+{"commands": ["ls -la", "cat README.md"], "explanation": "列出目录内容并查看README"}
+
+示例2 - 创建文件：
+{"commands": ["mkdir test", "cd test && touch file.txt"], "explanation": "创建目录和文件"}
+
+示例3 - 如果是普通对话（不需要命令）：
+{"commands": [], "explanation": "这是我的回答：我是Claude..."}
+
+现在请分析需求并返回JSON：
+</task>`;
 
     console.log('[Plan] 请求Claude生成执行计划');
 
@@ -277,38 +288,63 @@ export class ClaudeHandler {
       });
 
       let fullResponse = '';
+      let stderrOutput = '';
 
       claudeProcess.stdout?.on('data', (data: Buffer) => {
         fullResponse += data.toString();
       });
 
+      claudeProcess.stderr?.on('data', (data: Buffer) => {
+        stderrOutput += data.toString();
+      });
+
       claudeProcess.on('close', (code: number | null) => {
+        console.log('[Plan] Claude原始响应:', fullResponse.substring(0, 500));
+
         if (code === 0) {
           try {
-            // 尝试解析JSON响应
-            const jsonMatch = fullResponse.match(/\{[\s\S]*"commands"[\s\S]*\}/);
+            // 移除可能的markdown代码块标记
+            let cleaned = fullResponse.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+            // 尝试提取JSON对象
+            const jsonMatch = cleaned.match(/\{[\s\S]*?"commands"[\s\S]*?\}/);
             if (jsonMatch) {
               const result = JSON.parse(jsonMatch[0]);
-              console.log('[Plan] 生成的命令:', result.commands);
-              resolve(result);
+
+              // 验证结果格式
+              if (Array.isArray(result.commands)) {
+                console.log('[Plan] 生成的命令:', result.commands);
+                console.log('[Plan] 说明:', result.explanation);
+                resolve(result);
+              } else {
+                throw new Error('commands字段不是数组');
+              }
             } else {
-              // 如果没有JSON格式，尝试简单解析
-              console.log('[Plan] 未找到JSON，使用原始响应');
+              // 如果没有JSON格式，将原始响应作为explanation返回
+              console.log('[Plan] 未找到JSON格式，返回原始响应作为对话');
               resolve({
                 commands: [],
-                explanation: fullResponse.trim()
+                explanation: fullResponse.trim() || '无法生成命令'
               });
             }
           } catch (error) {
             console.error('[Plan] 解析失败:', error);
-            reject(new Error('无法解析Claude的响应'));
+            console.error('[Plan] 原始响应:', fullResponse);
+            // 解析失败时，返回原始响应作为对话内容
+            resolve({
+              commands: [],
+              explanation: fullResponse.trim() || '解析失败'
+            });
           }
         } else {
+          console.error('[Plan] Claude进程退出异常，代码:', code);
+          console.error('[Plan] stderr:', stderrOutput);
           reject(new Error(`Claude进程退出异常，代码: ${code}`));
         }
       });
 
       claudeProcess.on('error', (error: Error) => {
+        console.error('[Plan] 进程错误:', error);
         reject(error);
       });
     });
