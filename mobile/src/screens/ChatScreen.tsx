@@ -406,9 +406,9 @@ export function ChatScreen() {
     setIsLoading(true);
 
     const ws = getWebSocketService(serverUrl);
-    // 使用PTY模式：先让Claude生成执行计划
+    // 使用普通消息模式，让Claude正常对话
     ws.send({
-      type: 'planCommands',
+      type: 'message',
       id: messageId,
       content: text
     });
