@@ -1,6 +1,46 @@
 # Claude Code Mobile App - 开发进展
 
-## 最新状态 (2026-01-27)
+## 最新状态 (2026-01-31)
+
+### ✅ 新三层架构已完成并部署
+
+**架构**: Mobile App ↔ Server (消息路由) ↔ Desktop Client ↔ Claude CLI
+
+#### 部署信息
+- **Server**: 运行在 219服务器 (47.99.75.219:3001)
+- **Desktop Client**: 运行在 219服务器
+- **Mobile App**: v1.0.29-fixed
+- **状态**: ✅ 完整消息流程已验证
+
+### ✅ 最新修复 (2026-01-31)
+
+#### 1. Mobile App UI卡住问题
+- **问题**: 发送消息后UI冻结，无法发送第二条消息
+- **原因**: Desktop Client未发送response-done消息，isLoading状态未恢复
+- **修复**:
+  - Desktop Client在session结束时发送response-done
+  - Server转发responseDone给Mobile
+  - Mobile收到后恢复isLoading状态
+- **Commit**: 871a9a2
+
+#### 2. Server Auto-binding机制
+- **问题**: Server重启后Desktop未绑定到session
+- **修复**:
+  - 检测消息路由失败时自动绑定可用Desktop
+  - 支持多Desktop环境下的智能选择
+- **Commit**: 871a9a2
+
+#### 3. API Key配置
+- **问题**: Claude CLI缺少API认证
+- **修复**:
+  - PM2 ecosystem配置添加ANTHROPIC环境变量
+  - 从~/.claude/settings.json读取配置
+- **文件**: desktop/ecosystem.config.cjs
+
+#### 4. sessionId undefined修复
+- **问题**: ChatScreen调用ws.send()而非ws.sendMessage()
+- **修复**: 使用正确的sendMessage方法，自动添加sessionId
+- **Commit**: db275bd
 
 ### ✅ 已完成功能
 
