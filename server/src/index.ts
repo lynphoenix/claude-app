@@ -88,6 +88,7 @@ wss.on('connection', (ws: WebSocket) => {
     try {
       const message = JSON.parse(data.toString());
       console.log('收到消息:', message.type);
+      console.log('完整消息:', JSON.stringify(message));
 
       switch (message.type) {
         case 'init':
