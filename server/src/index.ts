@@ -240,12 +240,14 @@ wss.on('connection', (ws: WebSocket) => {
 
           try {
             const plan = await planHandler.planCommands(message.content);
-            ws.send(JSON.stringify({
+            const responseMsg = {
               type: 'commandPlan',
               commands: plan.commands,
               explanation: plan.explanation,
               messageId: message.id
-            }));
+            };
+            console.log('[Server] 发送commandPlan:', JSON.stringify(responseMsg).substring(0, 200));
+            ws.send(JSON.stringify(responseMsg));
           } catch (error: any) {
             ws.send(JSON.stringify({
               type: 'error',
