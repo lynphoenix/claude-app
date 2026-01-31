@@ -407,11 +407,11 @@ export function ChatScreen() {
 
     const ws = getWebSocketService(serverUrl);
     // 使用PTY模式：先让Claude生成执行计划
-    ws.send(JSON.stringify({
+    ws.send({
       type: 'planCommands',
       id: messageId,
       content: text
-    }));
+    });
   }, [connectionStatus, serverUrl]);
 
   // 重新连接
@@ -434,12 +434,12 @@ export function ChatScreen() {
   const handleExecuteCommands = useCallback((commands: string[]) => {
     console.log('[ChatScreen] 执行命令:', commands);
     const ws = getWebSocketService(serverUrl);
-    ws.send(JSON.stringify({
+    ws.send({
       type: 'executeCommands',
       id: `exec-${Date.now()}`,
       commands: commands,
       projectPath: currentProjectPath
-    }));
+    });
   }, [serverUrl, currentProjectPath]);
 
   // 取消执行命令
