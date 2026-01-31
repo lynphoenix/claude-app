@@ -1,12 +1,15 @@
+/**
+ * Claude Code Server - Message Router
+ * Routes messages between Mobile App and Desktop Client
+ * Does NOT execute Claude - that's done on Desktop Client
+ */
+
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import fs from 'fs';
-import path from 'path';
-import { ClaudeHandler } from './claudeHandler.js';
-import { PTYManager } from './ptyManager.js';
+import { DeviceManager } from './deviceManager.js';
 
 dotenv.config();
 
@@ -17,344 +20,288 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// 健康检查端点
+// Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// 获取可用的项目目录列表（扫描 /home/ecs-user/code）
-app.get('/api/projects', (req, res) => {
-  try {
-    const codeDir = '/home/ecs-user/code';
-
-    if (!fs.existsSync(codeDir)) {
-      fs.mkdirSync(codeDir, { recursive: true });
-    }
-
-    const entries = fs.readdirSync(codeDir, { withFileTypes: true });
-    const projects = entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => path.join(codeDir, entry.name));
-
-    res.json({ projects });
-  } catch (error) {
-    console.error('读取项目列表失败:', error);
-    res.status(500).json({ error: '读取项目列表失败' });
-  }
+// Device statistics endpoint
+app.get('/api/stats', (req, res) => {
+  const stats = deviceManager.getStats();
+  res.json(stats);
 });
 
-// 创建新项目
-app.post('/api/projects', express.json(), (req, res) => {
-  try {
-    const { name } = req.body;
-    if (!name) {
-      return res.status(400).json({ error: '项目名称不能为空' });
-    }
-
-    const codeDir = '/home/ecs-user/code';
-    const projectPath = path.join(codeDir, name);
-
-    if (fs.existsSync(projectPath)) {
-      return res.status(400).json({ error: '项目已存在' });
-    }
-
-    fs.mkdirSync(projectPath, { recursive: true });
-    res.json({ success: true, path: projectPath });
-  } catch (error) {
-    console.error('创建项目失败:', error);
-    res.status(500).json({ error: '创建项目失败' });
-  }
-});
-
-// 创建 WebSocket 服务器
+// Create WebSocket server
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// 存储客户端连接和PTY管理器
-const ptyManagers = new Map<WebSocket, PTYManager>();
-
-// 存储客户端连接
-const clients = new Map<WebSocket, ClaudeHandler>();
+// Create device manager
+const deviceManager = new DeviceManager();
 
 wss.on('connection', (ws: WebSocket) => {
-  console.log('新客户端连接');
+  let deviceId: string | null = null;
+  let deviceType: 'mobile' | 'desktop' | null = null;
 
-  // 发送欢迎消息
-  ws.send(JSON.stringify({
-    type: 'connected',
-    message: '已连接到 Claude Code 服务器'
-  }));
+  console.log('🔌 New WebSocket connection');
 
   ws.on('message', async (data: Buffer) => {
     try {
       const message = JSON.parse(data.toString());
-      console.log('收到消息:', message.type);
-      console.log('完整消息:', JSON.stringify(message));
+      console.log(`📨 Message from ${deviceId || 'unknown'}: ${message.type}`);
+
+      // Update activity
+      if (deviceId) {
+        deviceManager.updateActivity(deviceId);
+      }
 
       switch (message.type) {
-        case 'init':
-          // 初始化 Claude 处理器
-          // 默认使用 /home/ecs-user/code 作为"管家"目录
-          const defaultPath = '/home/ecs-user/code';
-          const projectPath = message.projectPath || defaultPath;
-          const handler = new ClaudeHandler(projectPath);
-
-          // 发送可用的项目列表
-          const codeDir = '/home/ecs-user/code';
-
-          if (!fs.existsSync(codeDir)) {
-            fs.mkdirSync(codeDir, { recursive: true });
+        // ================================================================
+        // Device Registration
+        // ================================================================
+        case 'register':
+          if (!message.deviceId || !message.deviceType) {
+            console.error('❌ Invalid registration: missing deviceId or deviceType');
+            break;
           }
 
-          const entries = fs.readdirSync(codeDir, { withFileTypes: true });
-          const projects = entries
-            .filter((entry) => entry.isDirectory())
-            .map((entry) => path.join(codeDir, entry.name));
+          deviceId = message.deviceId as string;
+          deviceType = message.deviceType as 'mobile' | 'desktop';
+
+          deviceManager.registerDevice(
+            deviceId,
+            deviceType,
+            ws,
+            message.publicKey
+          );
 
           ws.send(JSON.stringify({
-            type: 'projects',
-            projects: projects
+            type: 'registered',
+            deviceId,
+            message: 'Device registered successfully'
           }));
+          break;
 
-          clients.set(ws, handler);
+        // ================================================================
+        // Session Initialization (from Mobile)
+        // ================================================================
+        case 'init':
+          if (!deviceId) {
+            console.error('❌ Device not registered');
+            break;
+          }
 
-          // 获取并发送最近 20 条 session 历史
-          const history = await handler.getSessionHistory(20, 0);
+          const sessionId = message.sessionId;
+          deviceManager.setDeviceSession(deviceId, sessionId);
 
           ws.send(JSON.stringify({
             type: 'ready',
-            projectPath,
-            sessionId: handler.getSessionId(),
-            history: history.messages,
-            hasMoreHistory: history.hasMore,
-            totalMessages: history.total
+            sessionId
           }));
           break;
 
-        case 'changeProject':
-          // 切换项目目录
-          const newHandler = new ClaudeHandler(message.projectPath);
-          clients.set(ws, newHandler);
-
-          // 获取新项目的最近 20 条 session 历史
-          const newHistory = await newHandler.getSessionHistory(20, 0);
-
-          ws.send(JSON.stringify({
-            type: 'projectChanged',
-            projectPath: message.projectPath,
-            message: `已切换到项目: ${message.projectPath}`,
-            history: newHistory.messages,
-            hasMoreHistory: newHistory.hasMore,
-            totalMessages: newHistory.total
-          }));
-          break;
-
-        case 'loadMoreHistory':
-          // 加载更多历史消息
-          const loadHandler = clients.get(ws);
-          if (!loadHandler) {
-            ws.send(JSON.stringify({
-              type: 'error',
-              message: '请先初始化连接'
-            }));
-            break;
-          }
-
-          const offset = message.offset || 0;
-          const limit = message.limit || 20;
-          const moreHistory = await loadHandler.getSessionHistory(limit, offset);
-
-          ws.send(JSON.stringify({
-            type: 'historyLoaded',
-            history: moreHistory.messages,
-            hasMore: moreHistory.hasMore,
-            offset: offset,
-            total: moreHistory.total
-          }));
-          break;
-
+        // ================================================================
+        // User Message (Mobile → Desktop)
+        // ================================================================
         case 'message':
-          // 处理用户消息
-          const currentHandler = clients.get(ws);
-          if (!currentHandler) {
-            ws.send(JSON.stringify({
-              type: 'error',
-              message: '请先初始化连接'
-            }));
+          if (!deviceId) {
+            console.error('❌ Device not registered');
             break;
           }
 
-          // 发送用户消息确认
-          ws.send(JSON.stringify({
-            type: 'messageAck',
-            id: message.id
-          }));
+          console.log(`📤 Routing message to desktop (session: ${message.sessionId})`);
 
-          // 流式处理 Claude 响应
-          let fullResponse = '';
-          currentHandler.sendMessage(
-            message.content,
-            // 流式输出回调
-            (chunk) => {
-              fullResponse += chunk;
-              ws.send(JSON.stringify({
-                type: 'responseChunk',
-                content: chunk,
-                messageId: message.id
-              }));
-            },
-            // 完成回调
-            () => {
-              // 发送完整响应（兼容旧客户端）
-              ws.send(JSON.stringify({
-                type: 'response',
-                content: fullResponse,
-                messageId: message.id
-              }));
-
-              // 发送完成标志（新客户端）
-              ws.send(JSON.stringify({
-                type: 'responseDone',
-                messageId: message.id
-              }));
-            },
-            // 错误回调
-            (error) => {
-              ws.send(JSON.stringify({
-                type: 'error',
-                message: error
-              }));
+          const sent = deviceManager.sendToDesktop(message.sessionId, {
+            type: 'user-message',
+            data: {
+              sessionId: message.sessionId,
+              content: message.content,
+              projectPath: message.projectPath,
+              encrypted: message.encrypted || false
             }
-          );
-          break;
+          });
 
-        case 'planCommands':
-          // PTY模式：让Claude生成执行计划
-          const planHandler = clients.get(ws);
-          if (!planHandler) {
+          if (sent) {
+            // Acknowledge receipt
+            ws.send(JSON.stringify({
+              type: 'messageAck',
+              id: message.id
+            }));
+          } else {
             ws.send(JSON.stringify({
               type: 'error',
-              message: '请先初始化连接'
+              error: 'No desktop client available'
             }));
+          }
+          break;
+
+        // ================================================================
+        // Output Chunk (Desktop → Mobile)
+        // ================================================================
+        case 'output-chunk':
+          if (!deviceId) {
+            console.error('❌ Device not registered');
             break;
           }
 
-          try {
-            const plan = await planHandler.planCommands(message.content);
-            const responseMsg = {
-              type: 'commandPlan',
-              commands: plan.commands,
-              explanation: plan.explanation,
-              messageId: message.id
-            };
-            console.log('[Server] 发送commandPlan:', JSON.stringify(responseMsg).substring(0, 200));
-            ws.send(JSON.stringify(responseMsg));
-          } catch (error: any) {
-            ws.send(JSON.stringify({
-              type: 'error',
-              message: `生成执行计划失败: ${error.message}`
-            }));
-          }
+          console.log(`📤 Broadcasting output to mobiles (session: ${message.sessionId})`);
+
+          deviceManager.broadcastToMobiles(message.sessionId, {
+            type: 'responseChunk',
+            content: message.data.content,
+            encrypted: message.data.encrypted || false,
+            messageId: message.messageId
+          });
           break;
 
-        case 'executeCommands':
-          // PTY模式：用户确认后执行命令
-          const execHandler = clients.get(ws);
-          if (!execHandler) {
-            ws.send(JSON.stringify({
-              type: 'error',
-              message: '请先初始化连接'
-            }));
+        // ================================================================
+        // Permission Request (Desktop → Mobile)
+        // ================================================================
+        case 'permission-request':
+          if (!deviceId) {
+            console.error('❌ Device not registered');
             break;
           }
 
-          // 获取或创建PTY
-          let ptyManager = ptyManagers.get(ws);
-          if (!ptyManager) {
-            const sessionId = execHandler.getSessionId() || 'default';
-            const projectPath = message.projectPath || '/home/ecs-user/code';
-            ptyManager = new PTYManager(sessionId, projectPath);
-            ptyManager.createPTY();
-            ptyManagers.set(ws, ptyManager);
+          console.log(`🔐 Forwarding permission request to mobiles (session: ${message.sessionId})`);
 
-            // 监听PTY输出
-            ptyManager.onData((data) => {
-              ws.send(JSON.stringify({
-                type: 'terminalOutput',
-                data: data
-              }));
-            });
-
-            ptyManager.onExit((exitCode) => {
-              ws.send(JSON.stringify({
-                type: 'terminalExit',
-                exitCode: exitCode
-              }));
-              ptyManagers.delete(ws);
-            });
-          }
-
-          // 执行命令
-          const commands = message.commands || [];
-          for (const cmd of commands) {
-            ptyManager.executeCommand(cmd);
-          }
-
-          ws.send(JSON.stringify({
-            type: 'commandsExecuting',
-            messageId: message.id
-          }));
+          deviceManager.broadcastToMobiles(message.sessionId, {
+            type: 'permissionRequest',
+            requestId: message.data.requestId,
+            toolName: message.data.toolName,
+            input: message.data.input
+          });
           break;
 
-        case 'terminalInput':
-          // 用户在终端输入（如密码、确认等）
-          const inputPty = ptyManagers.get(ws);
-          if (inputPty) {
-            inputPty.sendInput(message.input);
+        // ================================================================
+        // Permission Response (Mobile → Desktop)
+        // ================================================================
+        case 'permission-response':
+          if (!deviceId) {
+            console.error('❌ Device not registered');
+            break;
+          }
+
+          console.log(`✅ Forwarding permission response to desktop (session: ${message.sessionId})`);
+
+          deviceManager.sendToDesktop(message.sessionId, {
+            type: 'permission-response',
+            data: {
+              id: message.requestId,
+              approved: message.approved,
+              reason: message.reason,
+              mode: message.mode,
+              allowTools: message.allowTools
+            }
+          });
+          break;
+
+        // ================================================================
+        // Status Update (Desktop → Mobile)
+        // ================================================================
+        case 'status':
+          if (!deviceId) {
+            console.error('❌ Device not registered');
+            break;
+          }
+
+          console.log(`📊 Broadcasting status update (session: ${message.sessionId})`);
+
+          deviceManager.broadcastToMobiles(message.sessionId, {
+            type: 'status',
+            status: message.data.status
+          });
+          break;
+
+        // ================================================================
+        // Device Switching
+        // ================================================================
+        case 'switch-mode':
+          if (!deviceId) {
+            console.error('❌ Device not registered');
+            break;
+          }
+
+          console.log(`🔄 Mode switch request: ${message.mode}`);
+
+          // Broadcast mode change to all devices in session
+          const device = deviceManager.getDevice(deviceId);
+          if (device && device.sessionId) {
+            deviceManager.broadcastToSession(
+              device.sessionId,
+              {
+                type: 'switch-mode',
+                data: {
+                  mode: message.mode,
+                  deviceId: deviceId
+                }
+              },
+              deviceId // Exclude sender
+            );
           }
           break;
 
+        // ================================================================
+        // Heartbeat
+        // ================================================================
         case 'ping':
           ws.send(JSON.stringify({ type: 'pong' }));
           break;
 
+        // ================================================================
+        // Unknown Message Type
+        // ================================================================
         default:
-          ws.send(JSON.stringify({
-            type: 'error',
-            message: '未知的消息类型'
-          }));
+          console.log(`⚠️  Unknown message type: ${message.type}`);
       }
     } catch (error) {
-      console.error('处理消息时出错:', error);
+      console.error('❌ Error handling message:', error);
       ws.send(JSON.stringify({
         type: 'error',
-        message: '处理消息时出错'
+        error: 'Internal server error'
       }));
     }
   });
 
   ws.on('close', () => {
-    console.log('客户端断开连接');
-    const handler = clients.get(ws);
-
-    // 清理PTY
-    const ptyManager = ptyManagers.get(ws);
-    if (ptyManager) {
-      ptyManager.destroy();
-      ptyManagers.delete(ws);
-    }
-    if (handler) {
-      handler.dispose();
-      clients.delete(ws);
+    console.log(`🔌 Connection closed: ${deviceId || 'unknown'}`);
+    if (deviceId) {
+      deviceManager.removeDevice(deviceId);
     }
   });
 
   ws.on('error', (error) => {
-    console.error('WebSocket 错误:', error);
+    console.error(`❌ WebSocket error (${deviceId || 'unknown'}):`, error);
   });
 });
 
+// Periodic cleanup of inactive devices
+setInterval(() => {
+  deviceManager.cleanupInactive(300000); // 5 minutes
+}, 60000); // Check every minute
+
+// Start server
 server.listen(PORT, () => {
-  console.log(`服务器运行在端口 ${PORT}`);
-  console.log(`WebSocket 端点: ws://localhost:${PORT}/ws`);
-  console.log(`默认项目路径: ${process.env.DEFAULT_PROJECT_PATH}`);
+  console.log(`\n🚀 Claude Code Server (Message Router)`);
+  console.log(`   Port: ${PORT}`);
+  console.log(`   WebSocket: ws://localhost:${PORT}/ws`);
+  console.log(`   Health: http://localhost:${PORT}/health`);
+  console.log(`   Stats: http://localhost:${PORT}/api/stats`);
+  console.log();
+  console.log(`✅ Server is running and ready to route messages\n`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('\n👋 SIGTERM received, shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('\n👋 SIGINT received, shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Server closed');
+    process.exit(0);
+  });
 });
