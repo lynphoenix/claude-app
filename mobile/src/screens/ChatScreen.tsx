@@ -30,7 +30,7 @@ export function ChatScreen() {
   const [connectionStatus, setConnectionStatus] = useState<ConnStatus>('disconnected');
   const [isLoading, setIsLoading] = useState(false);
   const [enableTTS, setEnableTTS] = useState(true);
-  const [serverUrl, setServerUrl] = useState('http://47.99.75.219:3001');
+  const [serverUrl, setServerUrl] = useState('ws://61.175.246.236:3002');
   const [currentProjectPath, setCurrentProjectPath] = useState('');
   const [projects, setProjects] = useState<ProjectConfig[]>([]);
   const [showSettings, setShowSettings] = useState(false);
