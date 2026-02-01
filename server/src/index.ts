@@ -159,12 +159,32 @@ wss.on('connection', (ws: WebSocket) => {
           console.log(`📋 List projects request from mobile`);
 
           // Forward to Desktop Client
-          const listProjectsSent = deviceManager.sendToDesktop(message.sessionId, {
+          let listProjectsSent = deviceManager.sendToDesktop(message.sessionId, {
             type: 'list-projects',
             data: {
               sessionId: message.sessionId
             }
           });
+
+          // Auto-bind if needed
+          if (!listProjectsSent) {
+            const availableDesktops = Array.from(deviceManager['devices'].values())
+              .filter(d => d.type === 'desktop');
+
+            if (availableDesktops.length > 0) {
+              const desktop = availableDesktops[0];
+              console.log(`📎 Auto-binding desktop ${desktop.id} to session ${message.sessionId}`);
+              deviceManager.setDeviceSession(desktop.id, message.sessionId);
+
+              // Retry sending
+              listProjectsSent = deviceManager.sendToDesktop(message.sessionId, {
+                type: 'list-projects',
+                data: {
+                  sessionId: message.sessionId
+                }
+              });
+            }
+          }
 
           if (!listProjectsSent) {
             ws.send(JSON.stringify({
