@@ -148,6 +148,50 @@ wss.on('connection', (ws: WebSocket) => {
           break;
 
         // ================================================================
+        // List Projects (from Mobile)
+        // ================================================================
+        case 'listProjects':
+          if (!deviceId) {
+            console.error('❌ Device not registered');
+            break;
+          }
+
+          console.log(`📋 List projects request from mobile`);
+
+          // Forward to Desktop Client
+          const listProjectsSent = deviceManager.sendToDesktop(message.sessionId, {
+            type: 'list-projects',
+            data: {
+              sessionId: message.sessionId
+            }
+          });
+
+          if (!listProjectsSent) {
+            ws.send(JSON.stringify({
+              type: 'error',
+              error: 'No desktop client available'
+            }));
+          }
+          break;
+
+        // ================================================================
+        // Projects List (from Desktop → Mobile)
+        // ================================================================
+        case 'projects-list':
+          if (!deviceId) {
+            console.error('❌ Device not registered');
+            break;
+          }
+
+          console.log(`📋 Broadcasting projects list to mobiles (${message.projects?.length || 0} projects)`);
+
+          deviceManager.broadcastToMobiles(message.sessionId, {
+            type: 'projects',
+            projects: message.projects
+          });
+          break;
+
+        // ================================================================
         // User Message (Mobile → Desktop)
         // ================================================================
         case 'message':

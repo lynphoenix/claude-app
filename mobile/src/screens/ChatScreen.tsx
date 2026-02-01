@@ -162,6 +162,14 @@ export function ChatScreen() {
 
       case 'ready':
         addSystemMessage(`已就绪: ${wsMessage.projectPath || ''}`);
+
+        // 请求项目列表
+        const ws = getWebSocketService(serverUrl);
+        ws.send({
+          type: 'listProjects',
+          sessionId: ws['sessionId'] // Access private sessionId
+        });
+
         // 加载历史消息
         if (wsMessage.history && Array.isArray(wsMessage.history)) {
           console.log('[ChatScreen] 收到历史消息:', wsMessage.history.length);
@@ -174,10 +182,12 @@ export function ChatScreen() {
 
       case 'projects':
         if (wsMessage.projects) {
-          const projectConfigs: ProjectConfig[] = wsMessage.projects.map(path => ({
-            name: path.split('/').filter(Boolean).pop() || path,
-            path
+          const projectConfigs: ProjectConfig[] = wsMessage.projects.map((proj: any) => ({
+            name: typeof proj === 'string' ? proj.split('/').filter(Boolean).pop() || proj : proj.name,
+            path: typeof proj === 'string' ? proj : proj.path,
+            hasClaudeDir: typeof proj === 'object' ? proj.hasClaudeDir : false
           }));
+          console.log('[ChatScreen] 收到项目列表:', projectConfigs.length, '个项目');
           setProjects(projectConfigs);
           getStorageService().updateProjects(projectConfigs);
         }

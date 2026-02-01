@@ -8,6 +8,7 @@ import { loadConfig, validateConfig, printConfig } from './config.js';
 import { ClaudeManager } from './claudeManager.js';
 import { WSClient } from './wsClient.js';
 import { SessionSync } from './sessionSync.js';
+import { PathValidator } from './pathValidator.js';
 // Temporarily disabled for testing
 // import {
 //   generateKeyPair,
@@ -57,6 +58,10 @@ async function main() {
   if (sessionSync.isEnabled()) {
     await sessionSync.initialize();
   }
+
+  // Create path validator
+  const pathValidator = new PathValidator(config.workDir!);
+  console.log(`📂 Root directory: ${pathValidator.getRootDir()}`);
 
   // Create WebSocket client
   const wsClient = new WSClient(
@@ -168,9 +173,25 @@ async function main() {
 
     // Start or send to Claude session
     try {
+      const projectPath = data.projectPath || config.workDir!;
+
+      // Validate path is within root directory
+      const validation = pathValidator.validate(projectPath);
+      if (!validation.valid) {
+        console.error(`❌ Path validation failed: ${validation.error}`);
+        wsClient.send({
+          type: 'error',
+          sessionId: data.sessionId,
+          error: validation.error
+        });
+        return;
+      }
+
+      console.log(`✅ Path validated: ${validation.resolved}`);
+
       await claudeManager.startSession(
         data.sessionId,
-        data.projectPath || config.workDir!,
+        validation.resolved!,
         content
       );
     } catch (e) {
@@ -185,6 +206,34 @@ async function main() {
     // Simply acknowledge - the actual project change happens
     // when the next user message arrives with the new projectPath
     // No need to do anything here as Claude sessions are per-message
+  });
+
+  // Handle list projects requests from server
+  wsClient.on('list-projects', async (data: any) => {
+    console.log(`📋 List projects request`);
+
+    try {
+      const projects = await pathValidator.listProjects();
+      console.log(`Found ${projects.length} projects`);
+
+      // Send back to server
+      wsClient.send({
+        type: 'projects-list',
+        sessionId: data.sessionId,
+        projects: projects.map(p => ({
+          name: p.name,
+          path: p.path,
+          hasClaudeDir: p.hasClaudeDir
+        }))
+      });
+    } catch (error) {
+      console.error('❌ Failed to list projects:', error);
+      wsClient.send({
+        type: 'error',
+        sessionId: data.sessionId,
+        error: 'Failed to list projects'
+      });
+    }
   });
 
   // Handle permission responses from server
