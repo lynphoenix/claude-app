@@ -61,13 +61,13 @@ export class PathValidator {
 
   /**
    * 列出根目录下的所有项目
-   * 项目定义：包含.claude目录的文件夹，或者根目录本身
+   * 项目定义：根目录下的所有直接子目录（1层），加上根目录本身
    */
   async listProjects(): Promise<ProjectInfo[]> {
     const projects: ProjectInfo[] = [];
 
     try {
-      // 添加根目录作为默认项目（管家模式）
+      // 添加根目录作为默认项目
       const rootHasClaudeDir = fs.existsSync(path.join(this.rootDir, '.claude'));
       projects.push({
         name: '🏠 根目录',
@@ -75,8 +75,27 @@ export class PathValidator {
         hasClaudeDir: rootHasClaudeDir
       });
 
-      // 递归查找包含.claude目录的子目录
-      await this.scanDirectory(this.rootDir, projects, 0, 3); // 最多扫描3层
+      // 列出根目录下的所有一级子目录
+      const entries = fs.readdirSync(this.rootDir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        // 跳过隐藏目录和node_modules等
+        if (entry.name.startsWith('.') || entry.name === 'node_modules') {
+          continue;
+        }
+
+        if (entry.isDirectory()) {
+          const fullPath = path.join(this.rootDir, entry.name);
+          const claudeDir = path.join(fullPath, '.claude');
+          const hasClaudeDir = fs.existsSync(claudeDir);
+
+          projects.push({
+            name: entry.name,
+            path: fullPath,
+            hasClaudeDir
+          });
+        }
+      }
 
       return projects;
     } catch (error) {
