@@ -99,6 +99,55 @@ wss.on('connection', (ws: WebSocket) => {
           break;
 
         // ================================================================
+        // Change Project (from Mobile)
+        // ================================================================
+        case 'changeProject':
+          if (!deviceId) {
+            console.error('❌ Device not registered');
+            break;
+          }
+
+          console.log(`🔄 Project change request: ${message.projectPath}`);
+
+          // Forward to Desktop Client
+          const changeProjectSent = deviceManager.sendToDesktop(message.sessionId, {
+            type: 'change-project',
+            data: {
+              sessionId: message.sessionId,
+              projectPath: message.projectPath
+            }
+          });
+
+          if (!changeProjectSent) {
+            // Auto-bind if needed
+            const availableDesktops = Array.from(deviceManager['devices'].values())
+              .filter(d => d.type === 'desktop');
+
+            if (availableDesktops.length > 0) {
+              const desktop = availableDesktops[0];
+              console.log(`📎 Auto-binding desktop ${desktop.id} to session ${message.sessionId}`);
+              deviceManager.setDeviceSession(desktop.id, message.sessionId);
+
+              // Retry
+              deviceManager.sendToDesktop(message.sessionId, {
+                type: 'change-project',
+                data: {
+                  sessionId: message.sessionId,
+                  projectPath: message.projectPath
+                }
+              });
+            }
+          }
+
+          // Acknowledge to mobile
+          ws.send(JSON.stringify({
+            type: 'projectChanged',
+            projectPath: message.projectPath,
+            sessionId: message.sessionId
+          }));
+          break;
+
+        // ================================================================
         // User Message (Mobile → Desktop)
         // ================================================================
         case 'message':

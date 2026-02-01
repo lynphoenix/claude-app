@@ -237,8 +237,14 @@ export class ClaudeWebSocketService {
   changeProject(projectPath: string): void {
     this.projectPath = projectPath;
 
-    // 切换项目时重新初始化会话
-    this.initializeSession();
+    console.log('切换项目到:', projectPath);
+
+    // 发送changeProject消息到Server
+    this.send({
+      type: 'changeProject',
+      sessionId: this.sessionId,
+      projectPath: projectPath
+    });
   }
 
   // 加载更多历史消息

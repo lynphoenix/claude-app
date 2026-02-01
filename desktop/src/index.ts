@@ -178,6 +178,15 @@ async function main() {
     }
   });
 
+  // Handle project change requests from server
+  wsClient.on('change-project', async (data: any) => {
+    console.log(`🔄 Change project request: ${data.projectPath}`);
+
+    // Simply acknowledge - the actual project change happens
+    // when the next user message arrives with the new projectPath
+    // No need to do anything here as Claude sessions are per-message
+  });
+
   // Handle permission responses from server
   wsClient.on('permission-response', async (data: PermissionResponseFromServer['data']) => {
     console.log(`✅ Permission response: ${data.approved ? 'APPROVED' : 'DENIED'}`);
