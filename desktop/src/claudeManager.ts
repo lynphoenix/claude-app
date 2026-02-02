@@ -62,7 +62,10 @@ export class ClaudeManager {
     console.log(`🔍 DEBUG: About to spawn Claude with path: ${this.claudePath}`);
     const claudeProcess = spawn(this.claudePath, args, {
       cwd: projectPath,
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env  // Inherit all environment variables from parent process
+      }
     });
 
     const session: ClaudeSession = {

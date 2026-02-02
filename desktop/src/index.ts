@@ -9,6 +9,8 @@ import { ClaudeManager } from './claudeManager.js';
 import { WSClient } from './wsClient.js';
 import { SessionSync } from './sessionSync.js';
 import { PathValidator } from './pathValidator.js';
+import { AutoUpdater } from './autoUpdater.js';
+import { COMPILED_VERSION } from './version.js';
 // Temporarily disabled for testing
 // import {
 //   generateKeyPair,
@@ -30,6 +32,7 @@ import { homedir } from 'os';
 
 async function main() {
   console.log('🚀 Claude Code Desktop Client Starting...\n');
+  console.log(`📦 Version: ${COMPILED_VERSION}\n`);
 
   // Load configuration
   const config = loadConfig();
@@ -62,6 +65,14 @@ async function main() {
   // Create path validator
   const pathValidator = new PathValidator(config.workDir!);
   console.log(`📂 Root directory: ${pathValidator.getRootDir()}`);
+
+  // Initialize auto-updater
+  const autoUpdater = new AutoUpdater({
+    checkInterval: 60 * 1000, // Check every 60 seconds
+    gitRemote: 'origin',
+    gitBranch: 'main',
+    autoRestart: true
+  });
 
   // Create WebSocket client
   const wsClient = new WSClient(
@@ -132,6 +143,9 @@ async function main() {
 
   // Connect to server
   await wsClient.connect();
+
+  // Start auto-updater after successful connection
+  autoUpdater.start();
 
   // Handle user messages from server
   wsClient.on('user-message', async (data: UserMessageFromServer['data']) => {
@@ -261,6 +275,7 @@ async function main() {
   const shutdown = async () => {
     console.log('\n👋 Shutting down...');
 
+    autoUpdater.stop();
     claudeManager.cleanup();
     wsClient.disconnect();
     await sessionSync.close();
