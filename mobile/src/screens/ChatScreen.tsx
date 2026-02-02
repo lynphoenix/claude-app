@@ -187,9 +187,12 @@ export function ChatScreen() {
           const projectConfigs: ProjectConfig[] = wsMessage.projects.map((proj: any) => ({
             name: typeof proj === 'string' ? proj.split('/').filter(Boolean).pop() || proj : proj.name,
             path: typeof proj === 'string' ? proj : proj.path,
-            hasClaudeDir: typeof proj === 'object' ? proj.hasClaudeDir : false
+            hasClaudeDir: typeof proj === 'object' ? proj.hasClaudeDir : false,
+            deviceId: typeof proj === 'object' ? proj.deviceId : undefined,
+            deviceName: typeof proj === 'object' ? proj.deviceName : undefined
           }));
           console.log('[ChatScreen] 收到项目列表:', projectConfigs.length, '个项目');
+          console.log('[ChatScreen] 第一个项目:', JSON.stringify(projectConfigs[0]));
           setProjects(projectConfigs);
           getStorageService().updateProjects(projectConfigs);
 

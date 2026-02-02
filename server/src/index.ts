@@ -204,10 +204,22 @@ wss.on('connection', (ws: WebSocket) => {
           }
 
           console.log(`📋 Broadcasting projects list to mobiles (${message.projects?.length || 0} projects)`);
+          console.log(`📋 Adding deviceId: ${deviceId}, deviceName: ${deviceId.replace('desktop-', '')}`);
+
+          // Add deviceId and deviceName to each project
+          const enrichedProjects = message.projects?.map((proj: any) => {
+            const enriched = {
+              ...proj,
+              deviceId: deviceId!,
+              deviceName: deviceId!.replace('desktop-', '') // e.g., desktop-h100 → h100
+            };
+            console.log(`📋 Enriched project: ${enriched.name} -> deviceName: ${enriched.deviceName}`);
+            return enriched;
+          });
 
           deviceManager.broadcastToMobiles(message.sessionId, {
             type: 'projects',
-            projects: message.projects
+            projects: enrichedProjects
           });
           break;
 
@@ -361,6 +373,26 @@ wss.on('connection', (ws: WebSocket) => {
           deviceManager.broadcastToMobiles(message.sessionId, {
             type: 'status',
             status: message.data.status
+          });
+          break;
+
+        // ================================================================
+        // Project Changed (Desktop → Mobile)
+        // ================================================================
+        case 'project-changed':
+          if (!deviceId) {
+            console.error('❌ Device not registered');
+            break;
+          }
+
+          console.log(`📁 Broadcasting project change (session: ${message.sessionId}, project: ${message.projectPath})`);
+
+          deviceManager.broadcastToMobiles(message.sessionId, {
+            type: 'projectChanged',
+            projectPath: message.projectPath,
+            message: message.message,
+            history: message.history,
+            hasMoreHistory: message.hasMoreHistory
           });
           break;
 

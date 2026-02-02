@@ -67,10 +67,10 @@ export class PathValidator {
     const projects: ProjectInfo[] = [];
 
     try {
-      // 添加根目录作为默认项目
+      // 添加根目录作为默认项目（使用实际路径，不显示emoji）
       const rootHasClaudeDir = fs.existsSync(path.join(this.rootDir, '.claude'));
       projects.push({
-        name: '🏠 根目录',
+        name: path.basename(this.rootDir), // 使用目录名而不是"根目录"
         path: this.rootDir,
         hasClaudeDir: rootHasClaudeDir
       });

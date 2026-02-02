@@ -45,3 +45,4 @@ mobile/eas-build-metadata.json
 # Temporary
 *.tmp
 *.temp
+mobile/*.apk

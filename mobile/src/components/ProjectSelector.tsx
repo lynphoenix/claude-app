@@ -32,12 +32,10 @@ export function ProjectSelector({
 
   const currentProject = projects.find(p => p.path === currentProjectPath);
 
-  // 为根目录添加特殊显示名称
+  // 获取项目显示名称：设备名:项目名
   const getProjectDisplayName = (project: ProjectConfig): string => {
-    if (project.path === '/home/ecs-user') {
-      return '🏠 根目录 (管家模式)';
-    }
-    return project.name;
+    const devicePrefix = project.deviceName ? `${project.deviceName}:` : '';
+    return `${devicePrefix}${project.name}`;
   };
 
   const handleSelect = (project: ProjectConfig) => {
@@ -115,7 +113,7 @@ export function ProjectSelector({
                 >
                   <View style={styles.projectInfo}>
                     <Ionicons
-                      name={item.path === '/home/ecs-user' ? 'home-outline' : 'folder'}
+                      name={item.hasClaudeDir ? 'folder' : 'folder-outline'}
                       size={24}
                       color={item.path === currentProjectPath ? '#2196F3' : '#757575'}
                     />

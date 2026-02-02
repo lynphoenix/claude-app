@@ -62,6 +62,9 @@ export interface WSMessage {
 export interface ProjectConfig {
   name: string;
   path: string;
+  hasClaudeDir?: boolean;
+  deviceId?: string; // 设备ID，用于多设备场景
+  deviceName?: string; // 设备显示名称
 }
 
 // 应用设置接口
