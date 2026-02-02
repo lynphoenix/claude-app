@@ -11,6 +11,7 @@ import { SessionSync } from './sessionSync.js';
 import { PathValidator } from './pathValidator.js';
 import { AutoUpdater } from './autoUpdater.js';
 import { COMPILED_VERSION } from './version.js';
+import { HistoryLoader } from './historyLoader.js';
 // Temporarily disabled for testing
 // import {
 //   generateKeyPair,
@@ -65,6 +66,9 @@ async function main() {
   // Create path validator
   const pathValidator = new PathValidator(config.workDir!);
   console.log(`📂 Root directory: ${pathValidator.getRootDir()}`);
+
+  // Create history loader
+  const historyLoader = new HistoryLoader();
 
   // Initialize auto-updater
   const autoUpdater = new AutoUpdater({
@@ -217,9 +221,50 @@ async function main() {
   wsClient.on('change-project', async (data: any) => {
     console.log(`🔄 Change project request: ${data.projectPath}`);
 
-    // Simply acknowledge - the actual project change happens
-    // when the next user message arrives with the new projectPath
-    // No need to do anything here as Claude sessions are per-message
+    try {
+      // Validate the project path
+      const validation = pathValidator.validate(data.projectPath);
+      if (!validation.valid) {
+        console.error(`❌ Path validation failed: ${validation.error}`);
+        wsClient.send({
+          type: 'error',
+          sessionId: data.sessionId,
+          error: validation.error
+        });
+        return;
+      }
+
+      // Load history for this project
+      const history = await historyLoader.loadHistory(data.projectPath, 50);
+      console.log(`📜 Loaded ${history.length} history messages for ${data.projectPath}`);
+
+      // Convert to Claude Code session format
+      const formattedHistory = history.map(msg => ({
+        type: msg.role === 'user' ? 'user' : 'assistant',
+        message: {
+          role: msg.role,
+          content: msg.content
+        },
+        timestamp: msg.timestamp
+      }));
+
+      // Send projectChanged confirmation with history
+      wsClient.send({
+        type: 'project-changed',
+        sessionId: data.sessionId,
+        projectPath: data.projectPath,
+        message: `切换到项目: ${data.projectPath}`,
+        history: formattedHistory,
+        hasMoreHistory: false
+      });
+    } catch (error) {
+      console.error('❌ Failed to change project:', error);
+      wsClient.send({
+        type: 'error',
+        sessionId: data.sessionId,
+        error: 'Failed to change project'
+      });
+    }
   });
 
   // Handle list projects requests from server

@@ -177,6 +177,8 @@ export function ChatScreen() {
           setHasMoreHistory(wsMessage.hasMoreHistory || false);
           const historyMessages = parseSessionHistory(wsMessage.history);
           setMessages(historyMessages);
+        } else {
+          console.log('[ChatScreen] 没有历史消息或格式不正确');
         }
         break;
 
@@ -190,6 +192,17 @@ export function ChatScreen() {
           console.log('[ChatScreen] 收到项目列表:', projectConfigs.length, '个项目');
           setProjects(projectConfigs);
           getStorageService().updateProjects(projectConfigs);
+
+          // 自动选择根目录（第一个项目通常是根目录）
+          if (projectConfigs.length > 0 && !currentProjectPath) {
+            const rootProject = projectConfigs[0]; // 🏠 根目录
+            console.log('[ChatScreen] 自动选择根目录:', rootProject.path);
+            setCurrentProjectPath(rootProject.path);
+            getStorageService().updateCurrentProject(rootProject.path);
+            // 切换到根目录以加载历史
+            const ws = getWebSocketService(serverUrl);
+            ws.changeProject(rootProject.path);
+          }
         }
         break;
 
