@@ -23,6 +23,7 @@ export class WSClient {
   constructor(
     private serverUrl: string,
     private deviceId: string,
+    private displayName?: string,
     private publicKey?: string
   ) {}
 
@@ -82,6 +83,7 @@ export class WSClient {
       type: 'register',
       deviceId: this.deviceId,
       deviceType: 'desktop',
+      displayName: this.displayName,
       publicKey: this.publicKey
     };
 

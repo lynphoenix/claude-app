@@ -41,13 +41,26 @@ function getDefaultDeviceId(): string {
 }
 
 /**
+ * Get default display name from device ID
+ */
+function getDefaultDisplayName(deviceId: string): string {
+  // Extract meaningful part from device ID
+  // e.g., desktop-macbook -> Macbook, desktop-h100 -> H100
+  const name = deviceId.replace('desktop-', '');
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+/**
  * Load configuration from environment
  */
 export function loadConfig(): DesktopConfig {
+  const deviceId = process.env.DEVICE_ID || getDefaultDeviceId();
+
   const config: DesktopConfig = {
     // Server connection
     serverUrl: process.env.SERVER_URL || 'ws://47.99.75.219:3001/ws',
-    deviceId: process.env.DEVICE_ID || getDefaultDeviceId(),
+    deviceId: deviceId,
+    displayName: process.env.DEVICE_DISPLAY_NAME || getDefaultDisplayName(deviceId),
 
     // Claude CLI
     claudePath: process.env.CLAUDE_PATH || getDefaultClaudePath(),
@@ -113,6 +126,7 @@ export function printConfig(config: DesktopConfig): void {
   console.log('📋 Desktop Client Configuration:');
   console.log(`   Server URL: ${config.serverUrl}`);
   console.log(`   Device ID: ${config.deviceId}`);
+  console.log(`   Display Name: ${config.displayName}`);
   console.log(`   Claude Path: ${config.claudePath}`);
   console.log(`   Work Directory: ${config.workDir}`);
   console.log(`   Database: ${config.database ? 'Enabled' : 'Disabled'}`);

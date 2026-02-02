@@ -111,6 +111,7 @@ export interface RegisterMessage extends WSMessage {
   type: 'register';
   deviceId: string;
   deviceType: 'desktop';
+  displayName?: string; // Friendly name like "H100", "Mac", "219"
   publicKey?: string; // For E2E encryption
 }
 
@@ -194,6 +195,7 @@ export interface DesktopConfig {
   // Server connection
   serverUrl: string;
   deviceId: string;
+  displayName?: string; // Friendly name like "H100", "Mac", "219"
 
   // Claude CLI
   claudePath?: string;

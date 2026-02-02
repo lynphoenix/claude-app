@@ -70,6 +70,7 @@ wss.on('connection', (ws: WebSocket) => {
             deviceId,
             deviceType,
             ws,
+            message.displayName,
             message.publicKey
           );
 
@@ -148,6 +149,31 @@ wss.on('connection', (ws: WebSocket) => {
           break;
 
         // ================================================================
+        // List Devices (from Mobile)
+        // ================================================================
+        case 'listDevices':
+          if (!deviceId) {
+            console.error('❌ Device not registered');
+            break;
+          }
+
+          console.log(`📱 List devices request from mobile`);
+
+          const desktops = deviceManager.getAllDesktops();
+          const deviceList = desktops.map(d => ({
+            id: d.id,
+            displayName: d.displayName || d.id.replace('desktop-', ''),
+            status: 'online', // All connected devices are online
+            lastActive: d.lastActive
+          }));
+
+          ws.send(JSON.stringify({
+            type: 'devices',
+            devices: deviceList
+          }));
+          break;
+
+        // ================================================================
         // List Projects (from Mobile)
         // ================================================================
         case 'listProjects':
@@ -204,14 +230,18 @@ wss.on('connection', (ws: WebSocket) => {
           }
 
           console.log(`📋 Broadcasting projects list to mobiles (${message.projects?.length || 0} projects)`);
-          console.log(`📋 Adding deviceId: ${deviceId}, deviceName: ${deviceId.replace('desktop-', '')}`);
+
+          // Get device info for displayName
+          const desktopDevice = deviceManager.getDevice(deviceId!);
+          const displayName = desktopDevice?.displayName || deviceId!.replace('desktop-', '');
+          console.log(`📋 Adding deviceId: ${deviceId}, displayName: ${displayName}`);
 
           // Add deviceId and deviceName to each project
           const enrichedProjects = message.projects?.map((proj: any) => {
             const enriched = {
               ...proj,
               deviceId: deviceId!,
-              deviceName: deviceId!.replace('desktop-', '') // e.g., desktop-h100 → h100
+              deviceName: displayName // Use displayName from device config
             };
             console.log(`📋 Enriched project: ${enriched.name} -> deviceName: ${enriched.deviceName}`);
             return enriched;

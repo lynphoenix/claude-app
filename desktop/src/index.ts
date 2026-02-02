@@ -82,6 +82,7 @@ async function main() {
   const wsClient = new WSClient(
     config.serverUrl,
     config.deviceId,
+    config.displayName,
     keyPair ? Buffer.from(keyPair.publicKey).toString('base64') : undefined
   );
 

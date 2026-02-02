@@ -10,6 +10,7 @@ export interface Device {
   type: 'mobile' | 'desktop';
   ws: WebSocket;
   sessionId: string | null;
+  displayName?: string; // Friendly name like "H100", "Mac", "219"
   publicKey?: string; // For E2E encryption
   lastActive: number;
   metadata?: {
@@ -28,6 +29,7 @@ export class DeviceManager {
     deviceId: string,
     type: 'mobile' | 'desktop',
     ws: WebSocket,
+    displayName?: string,
     publicKey?: string
   ): void {
     const device: Device = {
@@ -35,12 +37,13 @@ export class DeviceManager {
       type,
       ws,
       sessionId: null,
+      displayName,
       publicKey,
       lastActive: Date.now()
     };
 
     this.devices.set(deviceId, device);
-    console.log(`📱 Device registered: ${deviceId} (${type})`);
+    console.log(`📱 Device registered: ${deviceId} (${type})${displayName ? ` - ${displayName}` : ''}`);
   }
 
   /**
@@ -69,6 +72,13 @@ export class DeviceManager {
    */
   getDevice(deviceId: string): Device | undefined {
     return this.devices.get(deviceId);
+  }
+
+  /**
+   * Get all desktop devices (for device list)
+   */
+  getAllDesktops(): Device[] {
+    return Array.from(this.devices.values()).filter(d => d.type === 'desktop');
   }
 
   /**
