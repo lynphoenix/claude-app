@@ -219,10 +219,18 @@ export class ClaudeWebSocketService {
 
   // 发送用户消息
   sendMessage(content: string, messageId: string): void {
+    console.log('[WebSocket] sendMessage called, isRegistered:', this.isRegistered, 'sessionId:', this.sessionId);
+
     if (!this.isRegistered || !this.sessionId) {
-      console.error('设备未注册或会话未初始化');
+      console.error('设备未注册或会话未初始化, isRegistered:', this.isRegistered, 'sessionId:', this.sessionId);
       return;
     }
+
+    console.log('[WebSocket] Sending message to server:', {
+      type: 'message',
+      sessionId: this.sessionId,
+      content: content.substring(0, 50) + '...'
+    });
 
     this.send({
       type: 'message',
@@ -234,16 +242,17 @@ export class ClaudeWebSocketService {
   }
 
   // 切换项目
-  changeProject(projectPath: string): void {
+  changeProject(projectPath: string, targetDeviceId?: string): void {
     this.projectPath = projectPath;
 
-    console.log('切换项目到:', projectPath);
+    console.log('切换项目到:', projectPath, 'targetDeviceId:', targetDeviceId);
 
     // 发送changeProject消息到Server
     this.send({
       type: 'changeProject',
       sessionId: this.sessionId,
-      projectPath: projectPath
+      projectPath: projectPath,
+      targetDeviceId: targetDeviceId // 指定目标设备
     });
   }
 

@@ -41,6 +41,7 @@ export interface WSMessage {
   messageId?: string;
   projectPath?: string;
   projects?: string[];
+  devices?: any[]; // 设备列表
   history?: any[]; // Claude Code session 历史
   hasMoreHistory?: boolean; // 是否有更多历史
   totalMessages?: number; // 总消息数

@@ -1,0 +1,20 @@
+#!/usr/bin/expect -f
+# Expect wrapper for Claude Code to provide PTY
+
+set timeout -1
+set claude_path [lindex $argv 0]
+set work_dir [lindex $argv 1]
+set session_id [lindex $argv 2]
+
+# Change to working directory
+cd $work_dir
+
+# Build command
+if {$session_id != ""} {
+    spawn $claude_path --resume $session_id
+} else {
+    spawn $claude_path
+}
+
+# Set up interaction
+interact

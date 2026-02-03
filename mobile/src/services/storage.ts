@@ -5,7 +5,7 @@ const SETTINGS_KEY = '@claude_app_settings';
 const MESSAGES_KEY = '@claude_app_messages';
 
 const DEFAULT_SETTINGS: AppSettings = {
-  serverUrl: 'http://your-server.com:3001',
+  serverUrl: 'http://61.175.246.236:3003',
   enableTTS: true,
   currentProjectPath: '',
   projects: []
