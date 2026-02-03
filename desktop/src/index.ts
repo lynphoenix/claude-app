@@ -5,9 +5,10 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { loadConfig, validateConfig, printConfig } from './config.js';
-import { ClaudeManager } from './claudeManager.js';
+import { ClaudeProcessPool } from './claudeProcessPool.js';
 import { WSClient } from './wsClient.js';
 import { SessionSync } from './sessionSync.js';
+import { SessionWriter } from './sessionWriter.js';
 import { PathValidator } from './pathValidator.js';
 import { AutoUpdater } from './autoUpdater.js';
 import { COMPILED_VERSION } from './version.js';
@@ -70,6 +71,9 @@ async function main() {
   // Create history loader
   const historyLoader = new HistoryLoader();
 
+  // Create session writer (for persisting messages to local .jsonl files)
+  const sessionWriter = new SessionWriter();
+
   // Initialize auto-updater
   const autoUpdater = new AutoUpdater({
     checkInterval: 60 * 1000, // Check every 60 seconds
@@ -86,147 +90,109 @@ async function main() {
     keyPair ? Buffer.from(keyPair.publicKey).toString('base64') : undefined
   );
 
-  // Create Claude manager
-  const claudeManager = new ClaudeManager(
-    config.claudePath!,
-    // onOutput callback
-    (sessionId, content) => {
-      console.log(`📤 [${sessionId}] Output chunk (${content.length} chars)`);
+  // Claude Process Pool (manages multiple Claude processes)
+  const processPool = new ClaudeProcessPool(3); // Max 3 concurrent processes
+  let currentSessionId: string | null = null;
+  let currentProjectPath: string | null = null;
+  let currentClaudeSessionId: string | null = null; // Claude's internal session ID
+  let lastMessageUuid: string | null = null; // Track last message UUID for linking
 
-      // Encrypt if enabled
-      let encrypted = false;
-      let encryptedContent = content;
-
-      // Encryption temporarily disabled
-      // if (keyPair && serverPublicKey) {
-      //   try {
-      //     const encryptedData = encrypt(content, serverPublicKey, keyPair.privateKey);
-      //     encryptedContent = JSON.stringify(encryptedData);
-      //     encrypted = true;
-      //   } catch (e) {
-      //     console.error('❌ Encryption failed:', e);
-      //   }
-      // }
-
-      // Send to server
-      wsClient.sendOutputChunk(sessionId, encryptedContent, encrypted);
-
-      // Store in database
-      if (sessionSync.isEnabled()) {
-        const message: SessionMessage = {
-          id: uuidv4(),
-          sessionId,
-          role: 'assistant',
-          content: encryptedContent,
-          encrypted,
-          timestamp: Date.now()
-        };
-        sessionSync.storeMessage(message);
-      }
-    },
-    // onPermissionRequest callback
-    (request: PermissionRequest) => {
-      console.log(`🔐 Permission request: ${request.toolName}`);
-      wsClient.sendPermissionRequest(
-        request.sessionId,
-        request.id,
-        request.toolName,
-        request.input
-      );
-    },
-    // onSessionEnd callback
-    (sessionId, result) => {
-      console.log(`✅ Session ended: ${sessionId}`, result);
-
-      // 通知Server响应已完成
-      wsClient.send({
-        type: 'response-done',
-        sessionId: sessionId
-      });
+  // Handle output from Claude processes
+  processPool.on('output', (projectPath, chunk) => {
+    if (!currentSessionId) {
+      console.log(`⚠️  No active session, skipping output`);
+      return;
     }
-  );
 
-  // Connect to server
-  await wsClient.connect();
+    console.log(`📤 [Output] ${chunk.content.substring(0, 60)}...`);
 
-  // Start auto-updater after successful connection
-  autoUpdater.start();
-
-  // Handle user messages from server
-  wsClient.on('user-message', async (data: UserMessageFromServer['data']) => {
-    console.log(`📨 Received user message for session: ${data.sessionId}`);
-
-    let content = data.content;
-
-    // Decrypt if needed
-    if (data.encrypted && keyPair) {
-      try {
-        // Parse encrypted data
-        const encryptedData = JSON.parse(data.content);
-        // Decrypt (would need sender's public key from data.publicKey)
-        // For now, assume server forwards plaintext
-        // content = decrypt(encryptedData, senderPublicKey, keyPair.privateKey);
-      } catch (e) {
-        console.error('❌ Decryption failed:', e);
-      }
+    // Send to server (mark as permission request if detected)
+    if (chunk.isPermissionRequest) {
+      // Send as permission request
+      const requestId = uuidv4();
+      wsClient.send({
+        type: 'permission-request',
+        sessionId: currentSessionId,
+        data: {
+          requestId,
+          toolName: 'user-input',
+          input: { prompt: chunk.content }
+        }
+      });
+    } else {
+      // Send as normal output
+      wsClient.sendOutputChunk(currentSessionId, chunk.content, false);
     }
 
     // Store in database
     if (sessionSync.isEnabled()) {
-      await sessionSync.storeSession(
-        data.sessionId,
-        config.deviceId,
-        data.projectPath || config.workDir!
-      );
-
-      const message: SessionMessage = {
+      const dbMessage: SessionMessage = {
         id: uuidv4(),
-        sessionId: data.sessionId,
-        role: 'user',
-        content,
-        encrypted: data.encrypted || false,
-        timestamp: Date.now()
+        sessionId: currentSessionId,
+        role: 'assistant',
+        content: chunk.content,
+        encrypted: false,
+        timestamp: chunk.timestamp
       };
-      await sessionSync.storeMessage(message);
+      sessionSync.storeMessage(dbMessage);
     }
 
-    // Start or send to Claude session
-    try {
-      const projectPath = data.projectPath || config.workDir!;
+    // Write to local session file
+    if (currentProjectPath && currentClaudeSessionId) {
+      const assistantUuid = sessionWriter.writeAssistantMessage(currentProjectPath, currentClaudeSessionId, chunk.content, lastMessageUuid || undefined);
+      lastMessageUuid = assistantUuid; // Save for next message to link to
+    }
+  });
 
-      // Validate path is within root directory
-      const validation = pathValidator.validate(projectPath);
-      if (!validation.valid) {
-        console.error(`❌ Path validation failed: ${validation.error}`);
-        wsClient.send({
-          type: 'error',
-          sessionId: data.sessionId,
-          error: validation.error
-        });
-        return;
-      }
+  // Connect to server
+  await wsClient.connect();
 
-      console.log(`✅ Path validated: ${validation.resolved}`);
+  // Start auto-updater after successful connection (disabled in dev mode)
+  // autoUpdater.start();
 
-      await claudeManager.startSession(
-        data.sessionId,
-        validation.resolved!,
-        content
-      );
-    } catch (e) {
-      console.error('❌ Failed to start Claude session:', e);
+  // Handle user messages from mobile (write to Claude's stdin)
+  wsClient.on('user-message', async (data: UserMessageFromServer['data']) => {
+    console.log(`📥 [UserMessage] From mobile: ${data.content?.substring(0, 50)}...`);
+
+    const currentProcess = processPool.getCurrentProcess();
+
+    if (!currentProcess || !currentProcess.isRunning()) {
+      console.error('❌ [UserMessage] No active Claude process');
+      return;
+    }
+
+    // Write to Claude's stdin
+    currentProcess.writeInput(data.content);
+
+    // Store in database
+    if (sessionSync.isEnabled() && currentSessionId) {
+      const dbMessage: SessionMessage = {
+        id: uuidv4(),
+        sessionId: currentSessionId,
+        role: 'user',
+        content: data.content,
+        encrypted: false,
+        timestamp: Date.now()
+      };
+      sessionSync.storeMessage(dbMessage);
+    }
+
+    // Write to local session file
+    if (currentProjectPath && currentClaudeSessionId) {
+      const userUuid = sessionWriter.writeUserMessage(currentProjectPath, currentClaudeSessionId, data.content, lastMessageUuid || undefined);
+      lastMessageUuid = userUuid; // Save for next message to link to
     }
   });
 
   // Handle project change requests from server
   wsClient.on('change-project', async (data: any) => {
-    console.log(`🔄 Change project request: ${data.projectPath}`);
+    console.log(`🔄 [ChangeProject] Request: ${data.projectPath}`);
 
     try {
       // Validate the project path
       const validation = pathValidator.validate(data.projectPath);
       if (!validation.valid) {
-        console.error(`❌ Path validation failed: ${validation.error}`);
+        console.error(`❌ [ChangeProject] Path validation failed: ${validation.error}`);
         wsClient.send({
           type: 'error',
           sessionId: data.sessionId,
@@ -235,12 +201,22 @@ async function main() {
         return;
       }
 
+      console.log(`✅ [ChangeProject] Path validated: ${validation.resolved}`);
+
+      const projectPath = validation.resolved!;
+      currentSessionId = data.sessionId;
+      currentProjectPath = projectPath; // Track current project path
+
       // Load history for this project
-      const history = await historyLoader.loadHistory(data.projectPath, 50);
-      console.log(`📜 Loaded ${history.length} history messages for ${data.projectPath}`);
+      const history = await historyLoader.loadHistory(data.projectPath, 200);
+      console.log(`📜 [ChangeProject] Loaded ${history.length} history messages`);
+
+      // Only send the last 20 messages to mobile (for initial load)
+      const recentHistory = history.slice(-20);
+      console.log(`📱 [ChangeProject] Sending last ${recentHistory.length} messages to mobile`);
 
       // Convert to Claude Code session format
-      const formattedHistory = history.map(msg => ({
+      const formattedHistory = recentHistory.map(msg => ({
         type: msg.role === 'user' ? 'user' : 'assistant',
         message: {
           role: msg.role,
@@ -249,15 +225,31 @@ async function main() {
         timestamp: msg.timestamp
       }));
 
+      // Get or create Claude process for this project
+      // ProcessPool will automatically reuse if already running
+      await processPool.getOrCreateProcess(projectPath, {
+        claudePath: config.claudePath!
+      });
+
+      // Get the Claude session ID for writing messages
+      currentClaudeSessionId = processPool.getCurrentClaudeSessionId();
+      console.log(`📝 [ChangeProject] Using Claude session: ${currentClaudeSessionId}`);
+
+      // Log pool stats
+      const stats = processPool.getStats();
+      console.log(`📊 [ProcessPool] Stats:`, JSON.stringify(stats, null, 2));
+
       // Send projectChanged confirmation with history
+      console.log(`✅ [ChangeProject] Sending confirmation to mobile...`);
       wsClient.send({
         type: 'project-changed',
         sessionId: data.sessionId,
         projectPath: data.projectPath,
         message: `切换到项目: ${data.projectPath}`,
         history: formattedHistory,
-        hasMoreHistory: false
+        hasMoreHistory: history.length > 20  // If we loaded more than 20, there might be more
       });
+      console.log(`📱 Project-changed message sent!`);
     } catch (error) {
       console.error('❌ Failed to change project:', error);
       wsClient.send({
@@ -296,36 +288,35 @@ async function main() {
     }
   });
 
-  // Handle permission responses from server
+  // Handle permission responses from server (mobile user answered permission request)
   wsClient.on('permission-response', async (data: PermissionResponseFromServer['data']) => {
-    console.log(`✅ Permission response: ${data.approved ? 'APPROVED' : 'DENIED'}`);
+    console.log(`✅ [Permission] Response: ${data.approved ? 'APPROVED' : 'DENIED'}`);
 
-    const result = data.approved
-      ? { behavior: 'allow' as const, updatedInput: {} }
-      : { behavior: 'deny' as const, message: data.reason || 'User denied' };
+    const currentProcess = processPool.getCurrentProcess();
 
-    // Send response to Claude
-    // Note: We need to track which session this belongs to
-    // For now, find the session from active sessions
-    const sessions = claudeManager.getActiveSessions();
-    if (sessions.length > 0) {
-      await claudeManager.respondToPermission(
-        sessions[0].sessionId,
-        data.id,
-        result
-      );
+    if (!currentProcess || !currentProcess.isRunning()) {
+      console.error('❌ [Permission] No active Claude process');
+      return;
     }
+
+    // Write response to Claude's stdin
+    const response = data.approved ? 'yes' : 'no';
+    currentProcess.writeInput(response);
   });
 
   // Handle graceful shutdown
   const shutdown = async () => {
-    console.log('\n👋 Shutting down...');
+    console.log('\n👋 Desktop daemon shutting down...');
 
     autoUpdater.stop();
-    claudeManager.cleanup();
+
+    // Stop all Claude processes
+    processPool.stopAll();
+
     wsClient.disconnect();
     await sessionSync.close();
 
+    console.log('✅ Cleanup complete');
     process.exit(0);
   };
 

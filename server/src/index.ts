@@ -15,7 +15,7 @@ dotenv.config();
 
 const app = express();
 const server = createServer(app);
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3003;
 
 app.use(cors());
 app.use(express.json());
@@ -110,17 +110,36 @@ wss.on('connection', (ws: WebSocket) => {
 
           console.log(`🔄 Project change request: ${message.projectPath}`);
 
-          // Forward to Desktop Client
-          const changeProjectSent = deviceManager.sendToDesktop(message.sessionId, {
-            type: 'change-project',
-            data: {
-              sessionId: message.sessionId,
-              projectPath: message.projectPath
-            }
-          });
+          // Check if mobile specified a target device
+          const changeProjectTargetDeviceId = message.targetDeviceId;
+          let changeProjectSent = false;
 
+          if (changeProjectTargetDeviceId) {
+            // User explicitly selected a device - bind to it
+            console.log(`📌 Explicit device selection for project change: ${changeProjectTargetDeviceId}`);
+            deviceManager.setDeviceSession(changeProjectTargetDeviceId, message.sessionId);
+
+            // Send directly to the target device
+            changeProjectSent = deviceManager.sendToDevice(changeProjectTargetDeviceId, {
+              type: 'change-project',
+              data: {
+                sessionId: message.sessionId,
+                projectPath: message.projectPath
+              }
+            });
+          } else {
+            // Use current session binding
+            changeProjectSent = deviceManager.sendToDesktop(message.sessionId, {
+              type: 'change-project',
+              data: {
+                sessionId: message.sessionId,
+                projectPath: message.projectPath
+              }
+            });
+          }
+
+          // Auto-bind if needed
           if (!changeProjectSent) {
-            // Auto-bind if needed
             const availableDesktops = Array.from(deviceManager['devices'].values())
               .filter(d => d.type === 'desktop');
 
@@ -182,33 +201,52 @@ wss.on('connection', (ws: WebSocket) => {
             break;
           }
 
-          console.log(`📋 List projects request from mobile`);
+          console.log(`📋 List projects request from mobile, targetDeviceId: ${message.targetDeviceId || 'none'}`);
 
-          // Forward to Desktop Client
-          let listProjectsSent = deviceManager.sendToDesktop(message.sessionId, {
-            type: 'list-projects',
-            data: {
-              sessionId: message.sessionId
-            }
-          });
+          // Check if mobile specified a target device
+          const targetDeviceId = message.targetDeviceId;
+          let listProjectsSent = false;
 
-          // Auto-bind if needed
-          if (!listProjectsSent) {
-            const availableDesktops = Array.from(deviceManager['devices'].values())
-              .filter(d => d.type === 'desktop');
+          if (targetDeviceId) {
+            // User explicitly selected a device - bind to it
+            console.log(`📌 Explicit device selection: ${targetDeviceId}`);
+            deviceManager.setDeviceSession(targetDeviceId, message.sessionId);
 
-            if (availableDesktops.length > 0) {
-              const desktop = availableDesktops[0];
-              console.log(`📎 Auto-binding desktop ${desktop.id} to session ${message.sessionId}`);
-              deviceManager.setDeviceSession(desktop.id, message.sessionId);
+            // Send directly to the target device (not using sendToDesktop which searches session)
+            listProjectsSent = deviceManager.sendToDevice(targetDeviceId, {
+              type: 'list-projects',
+              data: {
+                sessionId: message.sessionId
+              }
+            });
+          } else {
+            // Auto-bind logic (for initial connection)
+            console.log(`🔄 No targetDeviceId, using auto-bind for session ${message.sessionId}`);
+            listProjectsSent = deviceManager.sendToDesktop(message.sessionId, {
+              type: 'list-projects',
+              data: {
+                sessionId: message.sessionId
+              }
+            });
 
-              // Retry sending
-              listProjectsSent = deviceManager.sendToDesktop(message.sessionId, {
-                type: 'list-projects',
-                data: {
-                  sessionId: message.sessionId
-                }
-              });
+            // Auto-bind if needed
+            if (!listProjectsSent) {
+              const availableDesktops = Array.from(deviceManager['devices'].values())
+                .filter(d => d.type === 'desktop');
+
+              if (availableDesktops.length > 0) {
+                const desktop = availableDesktops[0];
+                console.log(`📎 Auto-binding desktop ${desktop.id} to session ${message.sessionId}`);
+                deviceManager.setDeviceSession(desktop.id, message.sessionId);
+
+                // Retry sending
+                listProjectsSent = deviceManager.sendToDesktop(message.sessionId, {
+                  type: 'list-projects',
+                  data: {
+                    sessionId: message.sessionId
+                  }
+                });
+              }
             }
           }
 
@@ -262,7 +300,7 @@ wss.on('connection', (ws: WebSocket) => {
             break;
           }
 
-          console.log(`📤 Routing message to desktop (session: ${message.sessionId})`);
+          console.log(`📤 [Message] From mobile deviceId: ${deviceId}, sessionId: ${message.sessionId}, content: ${message.content?.substring(0, 50)}`);
 
           let sent = deviceManager.sendToDesktop(message.sessionId, {
             type: 'user-message',
@@ -274,10 +312,15 @@ wss.on('connection', (ws: WebSocket) => {
             }
           });
 
+          console.log(`📤 [Message] sendToDesktop result: ${sent}`);
+
           // Auto-bind desktop if not already bound
           if (!sent) {
+            console.log(`⚠️  [Message] No desktop found for session ${message.sessionId}, attempting auto-bind...`);
             const availableDesktops = Array.from(deviceManager['devices'].values())
               .filter(d => d.type === 'desktop');
+
+            console.log(`📋 [Message] Available desktops: ${availableDesktops.length}`, availableDesktops.map(d => d.id));
 
             if (availableDesktops.length > 0) {
               const desktop = availableDesktops[0];
@@ -356,13 +399,14 @@ wss.on('connection', (ws: WebSocket) => {
             break;
           }
 
-          console.log(`🔐 Forwarding permission request to mobiles (session: ${message.sessionId})`);
+          console.log(`🔐 Forwarding permission request to mobiles (session: ${message.sessionId}, from: ${deviceId})`);
 
           deviceManager.broadcastToMobiles(message.sessionId, {
             type: 'permissionRequest',
             requestId: message.data.requestId,
             toolName: message.data.toolName,
-            input: message.data.input
+            input: message.data.input,
+            fromDeviceId: deviceId  // Track which device sent this request
           });
           break;
 
@@ -375,18 +419,33 @@ wss.on('connection', (ws: WebSocket) => {
             break;
           }
 
-          console.log(`✅ Forwarding permission response to desktop (session: ${message.sessionId})`);
+          console.log(`✅ Forwarding permission response to desktop (session: ${message.sessionId}, target: ${message.targetDeviceId || 'auto'})`);
 
-          deviceManager.sendToDesktop(message.sessionId, {
-            type: 'permission-response',
-            data: {
-              id: message.requestId,
-              approved: message.approved,
-              reason: message.reason,
-              mode: message.mode,
-              allowTools: message.allowTools
-            }
-          });
+          // Route to the specific device that sent the permission request
+          if (message.targetDeviceId) {
+            deviceManager.sendToDevice(message.targetDeviceId, {
+              type: 'permission-response',
+              data: {
+                id: message.requestId,
+                approved: message.approved,
+                reason: message.reason,
+                mode: message.mode,
+                allowTools: message.allowTools
+              }
+            });
+          } else {
+            // Fallback to old behavior
+            deviceManager.sendToDesktop(message.sessionId, {
+              type: 'permission-response',
+              data: {
+                id: message.requestId,
+                approved: message.approved,
+                reason: message.reason,
+                mode: message.mode,
+                allowTools: message.allowTools
+              }
+            });
+          }
           break;
 
         // ================================================================

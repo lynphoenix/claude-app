@@ -30,6 +30,13 @@ export function SettingsPanel({
 }: SettingsPanelProps) {
   const [tempServerUrl, setTempServerUrl] = React.useState(serverUrl);
 
+  // 当modal打开时，同步最新的serverUrl
+  React.useEffect(() => {
+    if (visible) {
+      setTempServerUrl(serverUrl);
+    }
+  }, [visible, serverUrl]);
+
   const handleSaveServerUrl = () => {
     if (!tempServerUrl.trim()) {
       Alert.alert('错误', '服务器地址不能为空');

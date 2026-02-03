@@ -20,6 +20,7 @@ import { ConnectionStatus } from '../components/ConnectionStatus';
 import { ChatMessage } from '../components/ChatMessage';
 import { ChatInput } from '../components/ChatInput';
 import { ProjectSelector } from '../components/ProjectSelector';
+import { DeviceSelector, DeviceInfo } from '../components/DeviceSelector';
 import { SettingsPanel } from '../components/SettingsPanel';
 
 import { getWebSocketService, getVoiceService, getStorageService } from '../services';
@@ -30,9 +31,11 @@ export function ChatScreen() {
   const [connectionStatus, setConnectionStatus] = useState<ConnStatus>('disconnected');
   const [isLoading, setIsLoading] = useState(false);
   const [enableTTS, setEnableTTS] = useState(true);
-  const [serverUrl, setServerUrl] = useState('ws://61.175.246.236:3002');
+  const [serverUrl, setServerUrl] = useState('ws://47.99.75.219:3001');
   const [currentProjectPath, setCurrentProjectPath] = useState('');
   const [projects, setProjects] = useState<ProjectConfig[]>([]);
+  const [devices, setDevices] = useState<DeviceInfo[]>([]);
+  const [currentDeviceId, setCurrentDeviceId] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -41,6 +44,7 @@ export function ChatScreen() {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [confirmPrompt, setConfirmPrompt] = useState('');
   const [confirmMessageId, setConfirmMessageId] = useState('');
+  const [permissionFromDeviceId, setPermissionFromDeviceId] = useState('');
 
   // PTY命令确认相关状态
   const [showCommandDialog, setShowCommandDialog] = useState(false);
@@ -163,12 +167,21 @@ export function ChatScreen() {
       case 'ready':
         addSystemMessage(`已就绪: ${wsMessage.projectPath || ''}`);
 
-        // 请求项目列表
+        // 先请求设备列表，收到设备列表后会自动请求第一个设备的项目
         const ws = getWebSocketService(serverUrl);
         ws.send({
-          type: 'listProjects',
-          sessionId: ws['sessionId'] // Access private sessionId
+          type: 'listDevices',
+          sessionId: ws['sessionId']
         });
+
+        // 如果已经有currentDeviceId，请求该设备的项目列表
+        if (currentDeviceId) {
+          ws.send({
+            type: 'listProjects',
+            sessionId: ws['sessionId'],
+            targetDeviceId: currentDeviceId
+          });
+        }
 
         // 加载历史消息
         if (wsMessage.history && Array.isArray(wsMessage.history)) {
@@ -179,6 +192,28 @@ export function ChatScreen() {
           setMessages(historyMessages);
         } else {
           console.log('[ChatScreen] 没有历史消息或格式不正确');
+        }
+        break;
+
+      case 'devices':
+        if (wsMessage.devices) {
+          console.log('[ChatScreen] 收到设备列表:', wsMessage.devices.length, '个设备');
+          setDevices(wsMessage.devices);
+
+          // 自动选择第一个设备并请求其项目列表
+          if (wsMessage.devices.length > 0 && !currentDeviceId) {
+            const firstDevice = wsMessage.devices[0];
+            console.log('[ChatScreen] 自动选择第一个设备:', firstDevice.displayName);
+            setCurrentDeviceId(firstDevice.id);
+
+            // 请求该设备的项目列表
+            const ws = getWebSocketService(serverUrl);
+            ws.send({
+              type: 'listProjects',
+              sessionId: ws['sessionId'],
+              targetDeviceId: firstDevice.id
+            });
+          }
         }
         break;
 
@@ -196,9 +231,14 @@ export function ChatScreen() {
           setProjects(projectConfigs);
           getStorageService().updateProjects(projectConfigs);
 
+          // 保存设备ID（从第一个项目获取）
+          if (projectConfigs.length > 0 && projectConfigs[0].deviceId) {
+            setCurrentDeviceId(projectConfigs[0].deviceId);
+          }
+
           // 自动选择根目录（第一个项目通常是根目录）
           if (projectConfigs.length > 0 && !currentProjectPath) {
-            const rootProject = projectConfigs[0]; // 🏠 根目录
+            const rootProject = projectConfigs[0];
             console.log('[ChatScreen] 自动选择根目录:', rootProject.path);
             setCurrentProjectPath(rootProject.path);
             getStorageService().updateCurrentProject(rootProject.path);
@@ -210,6 +250,8 @@ export function ChatScreen() {
         break;
 
       case 'projectChanged':
+        console.log('[ChatScreen] 项目切换完成，清除loading状态');
+        setIsLoading(false); // 清除loading状态
         setCurrentProjectPath(wsMessage.projectPath || '');
         getStorageService().updateCurrentProject(wsMessage.projectPath || '');
         // 清空当前消息
@@ -220,6 +262,7 @@ export function ChatScreen() {
           loadedMessagesCount.current = wsMessage.history.length;
           setHasMoreHistory(wsMessage.hasMoreHistory || false);
           const historyMessages = parseSessionHistory(wsMessage.history);
+          // inverted模式下，直接设置消息即可（最新在底部）
           setMessages([...historyMessages, {
             id: `sys-${Date.now()}`,
             type: 'system',
@@ -246,6 +289,18 @@ export function ChatScreen() {
 
       case 'messageAck':
         // 消息已确认，开始流式接收
+        break;
+
+      case 'permissionRequest':
+        // 处理权限请求
+        console.log('[ChatScreen] 收到权限请求:', wsMessage.toolName, 'fromDeviceId:', wsMessage.fromDeviceId);
+        if (wsMessage.requestId && wsMessage.toolName) {
+          const permissionPrompt = `Claude Code 请求权限:\n\n工具: ${wsMessage.toolName}\n\n是否允许执行?`;
+          setConfirmPrompt(permissionPrompt);
+          setConfirmMessageId(wsMessage.requestId);
+          setPermissionFromDeviceId(wsMessage.fromDeviceId || '');
+          setShowConfirmDialog(true);
+        }
         break;
 
       case 'confirmationPrompt':
@@ -447,9 +502,36 @@ export function ChatScreen() {
 
   // 切换项目
   const handleSelectProject = useCallback((project: ProjectConfig) => {
+    console.log('[ChatScreen] 切换项目:', project.name, 'deviceId:', project.deviceId);
+
+    // 如果项目属于不同的设备，先切换设备
+    if (project.deviceId && project.deviceId !== currentDeviceId) {
+      console.log('[ChatScreen] 项目属于不同设备，切换到:', project.deviceId);
+      setCurrentDeviceId(project.deviceId);
+    }
+
     // 切换到新项目，服务端会返回该项目的 session 历史
     const ws = getWebSocketService(serverUrl);
-    ws.changeProject(project.path);
+    ws.changeProject(project.path, project.deviceId);
+  }, [serverUrl, currentDeviceId]);
+
+  // 切换设备
+  const handleSelectDevice = useCallback((device: DeviceInfo) => {
+    console.log('[ChatScreen] 切换设备:', device.displayName);
+    setCurrentDeviceId(device.id);
+    setCurrentProjectPath(''); // 清空当前项目
+    setProjects([]); // 清空项目列表
+    setMessages([]); // 清空消息
+
+    // 重新请求该设备的项目列表（指定设备ID）
+    const ws = getWebSocketService(serverUrl);
+    ws.send({
+      type: 'listProjects',
+      sessionId: ws['sessionId'],
+      targetDeviceId: device.id // 指定要查询的设备
+    });
+
+    addSystemMessage(`已切换到设备: ${device.displayName}`);
   }, [serverUrl]);
 
   // 执行命令（用户确认后）
@@ -515,11 +597,28 @@ export function ChatScreen() {
   }, [serverUrl, handleSelectProject]);
 
   // 保存服务器地址
-  const handleSaveServerUrl = useCallback((url: string) => {
+  const handleSaveServerUrl = useCallback(async (url: string) => {
+    console.log('[ChatScreen] 更新服务器地址:', url);
+
+    // 断开旧连接
+    const oldWs = getWebSocketService(serverUrl);
+    oldWs.disconnect();
+
+    // 更新URL
     setServerUrl(url);
-    getStorageService().updateServerUrl(url);
-    getWebSocketService(url).updateServerUrl(url);
-  }, []);
+    await getStorageService().updateServerUrl(url);
+
+    // 清空当前状态
+    setMessages([]);
+    setCurrentProjectPath('');
+    setProjects([]);
+    setDevices([]);
+    setCurrentDeviceId('');
+
+    // 重新连接到新服务器
+    console.log('[ChatScreen] 重新连接到新服务器:', url);
+    connect('');
+  }, [serverUrl, connect]);
 
   // 切换 TTS
   const handleToggleTTS = useCallback((enabled: boolean) => {
@@ -541,23 +640,36 @@ export function ChatScreen() {
 
   // 处理确认响应
   const handleConfirmResponse = useCallback((response: string) => {
-    console.log('[ChatScreen] 发送确认响应:', response);
+    console.log('[ChatScreen] 发送确认响应:', response, 'confirmMessageId:', confirmMessageId, 'fromDeviceId:', permissionFromDeviceId);
     const ws = getWebSocketService(serverUrl);
-    ws.sendConfirmResponse(response);
+
+    // 判断是权限请求还是普通确认
+    if (confirmMessageId && confirmPrompt.includes('Claude Code 请求权限')) {
+      // 这是权限请求
+      console.log('[ChatScreen] 发送权限响应:', response === 'y' ? '允许' : '拒绝', 'to device:', permissionFromDeviceId);
+      ws.send({
+        type: 'permission-response',
+        sessionId: ws['sessionId'],
+        requestId: confirmMessageId,
+        approved: response === 'y',
+        reason: response === 'y' ? '' : '用户拒绝',
+        mode: 'once', // 仅本次
+        allowTools: [],
+        targetDeviceId: permissionFromDeviceId  // Echo back the source device
+      });
+    } else {
+      // 普通确认提示
+      console.log('[ChatScreen] 发送普通确认响应');
+      ws.sendConfirmResponse(response);
+    }
+
     setShowConfirmDialog(false);
     setConfirmPrompt('');
-  }, [serverUrl]);
+    setConfirmMessageId(''); // 清空messageId
+    setPermissionFromDeviceId(''); // 清空设备ID
+  }, [serverUrl, confirmMessageId, confirmPrompt, permissionFromDeviceId]);
 
   // 消息历史由服务端的 Claude Code session 管理，客户端不需要保存
-
-  // 自动滚动到底部
-  useEffect(() => {
-    if (messages.length > 0) {
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-    }
-  }, [messages]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -573,6 +685,13 @@ export function ChatScreen() {
       <ConnectionStatus
         status={connectionStatus}
         onReconnect={handleReconnect}
+      />
+
+      {/* 设备选择器 */}
+      <DeviceSelector
+        devices={devices}
+        currentDeviceId={currentDeviceId}
+        onSelectDevice={handleSelectDevice}
       />
 
       {/* 项目选择器 */}
@@ -597,9 +716,10 @@ export function ChatScreen() {
           contentContainerStyle={styles.messagesList}
           keyboardShouldPersistTaps="handled"
           style={styles.chatList}
+          inverted  // 倒序显示，最新消息在底部
           onEndReached={handleLoadMore}
           onEndReachedThreshold={0.1}
-          ListHeaderComponent={
+          ListFooterComponent={
             isLoadingMore ? (
               <View style={{ padding: 10, alignItems: 'center' }}>
                 <Text style={{ color: '#757575' }}>加载中...</Text>
