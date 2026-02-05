@@ -207,8 +207,9 @@ async function main() {
       currentSessionId = data.sessionId;
       currentProjectPath = projectPath; // Track current project path
 
-      // Load history for this project
-      const history = await historyLoader.loadHistory(data.projectPath, 200);
+      // Load history for this project (use resolved path, not original path)
+      console.log(`📜 [ChangeProject] Loading history from path: ${projectPath}`);
+      const history = await historyLoader.loadHistory(projectPath, 200);
       console.log(`📜 [ChangeProject] Loaded ${history.length} history messages`);
 
       // Only send the last 20 messages to mobile (for initial load)

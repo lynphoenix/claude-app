@@ -258,9 +258,18 @@ export class ClaudeWebSocketService {
 
   // 加载更多历史消息
   loadMoreHistory(offset: number, limit: number = 20): void {
-    // TODO: 新架构下history由Desktop Client管理
-    // 可能需要新的消息类型或从Server查询
-    console.warn('loadMoreHistory: 新架构下需要实现');
+    if (!this.sessionId) {
+      console.error('[WebSocket] Cannot load more history: no session');
+      return;
+    }
+
+    console.log(`[WebSocket] Loading more history: offset=${offset}, limit=${limit}`);
+    this.send({
+      type: 'loadMoreHistory',
+      sessionId: this.sessionId,
+      offset,
+      limit
+    });
   }
 
   // 发送确认响应
@@ -335,8 +344,11 @@ export class ClaudeWebSocketService {
 let serviceInstance: ClaudeWebSocketService | null = null;
 
 export function getWebSocketService(serverUrl: string): ClaudeWebSocketService {
-  if (!serviceInstance || serviceInstance.getStatus() === 'disconnected') {
+  if (!serviceInstance) {
     serviceInstance = new ClaudeWebSocketService(serverUrl);
+  } else {
+    // 如果 serverUrl 变了，更新服务实例
+    serviceInstance.updateServerUrl(serverUrl);
   }
   return serviceInstance;
 }

@@ -31,7 +31,7 @@ export function ChatScreen() {
   const [connectionStatus, setConnectionStatus] = useState<ConnStatus>('disconnected');
   const [isLoading, setIsLoading] = useState(false);
   const [enableTTS, setEnableTTS] = useState(true);
-  const [serverUrl, setServerUrl] = useState('ws://47.99.75.219:3001');
+  const [serverUrl, setServerUrl] = useState('ws://61.175.246.236:3002');
   const [currentProjectPath, setCurrentProjectPath] = useState('');
   const [projects, setProjects] = useState<ProjectConfig[]>([]);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
@@ -84,6 +84,19 @@ export function ChatScreen() {
     init();
   }, []);
 
+  // 注册WebSocket消息监听器（独立于connect）
+  useEffect(() => {
+    const ws = getWebSocketService(serverUrl);
+
+    // 注册消息监听器，返回清理函数
+    const unsubscribe = ws.onMessage(handleWSMessage);
+
+    // 清理：组件卸载或handleWSMessage变化时移除旧监听器
+    return () => {
+      unsubscribe();
+    };
+  }, [serverUrl, handleWSMessage]);
+
   // 连接到服务器
   const connect = useCallback(async (projectPath: string) => {
     try {
@@ -93,9 +106,6 @@ export function ChatScreen() {
       ws.onStatusChange((status) => {
         setConnectionStatus(status);
       });
-
-      // 监听消息
-      ws.onMessage(handleWSMessage);
 
       await ws.connect(projectPath);
     } catch (error) {
@@ -231,33 +241,29 @@ export function ChatScreen() {
           setProjects(projectConfigs);
           getStorageService().updateProjects(projectConfigs);
 
-          // 保存设备ID（从第一个项目获取）
-          if (projectConfigs.length > 0 && projectConfigs[0].deviceId) {
-            setCurrentDeviceId(projectConfigs[0].deviceId);
-          }
-
           // 自动选择根目录（第一个项目通常是根目录）
           if (projectConfigs.length > 0 && !currentProjectPath) {
             const rootProject = projectConfigs[0];
-            console.log('[ChatScreen] 自动选择根目录:', rootProject.path);
+            console.log('[ChatScreen] 自动选择根目录:', rootProject.path, '设备:', currentDeviceId);
             setCurrentProjectPath(rootProject.path);
             getStorageService().updateCurrentProject(rootProject.path);
-            // 切换到根目录以加载历史
+            // 切换到根目录以加载历史（传递当前设备ID）
             const ws = getWebSocketService(serverUrl);
-            ws.changeProject(rootProject.path);
+            ws.changeProject(rootProject.path, currentDeviceId);
           }
         }
         break;
 
       case 'projectChanged':
         console.log('[ChatScreen] 项目切换完成，清除loading状态');
+        console.log('[ChatScreen] projectChanged消息:', JSON.stringify(wsMessage));
         setIsLoading(false); // 清除loading状态
         setCurrentProjectPath(wsMessage.projectPath || '');
         getStorageService().updateCurrentProject(wsMessage.projectPath || '');
         // 清空当前消息
         setMessages([]);
         // 加载新项目的历史消息
-        if (wsMessage.history && Array.isArray(wsMessage.history)) {
+        if (wsMessage.history && Array.isArray(wsMessage.history) && wsMessage.history.length > 0) {
           console.log('[ChatScreen] 切换项目，收到历史消息:', wsMessage.history.length);
           loadedMessagesCount.current = wsMessage.history.length;
           setHasMoreHistory(wsMessage.hasMoreHistory || false);
@@ -270,7 +276,14 @@ export function ChatScreen() {
             timestamp: new Date()
           }]);
         } else {
-          addSystemMessage(wsMessage.message || '项目已切换');
+          // 没有历史消息，只显示系统消息
+          console.log('[ChatScreen] 切换项目，无历史消息');
+          setMessages([{
+            id: `sys-${Date.now()}`,
+            type: 'system',
+            content: wsMessage.message || '项目已切换（无历史记录）',
+            timestamp: new Date()
+          }]);
         }
         break;
 
@@ -402,7 +415,7 @@ export function ChatScreen() {
         addErrorMessage(wsMessage.message || '发生错误');
         break;
     }
-  }, [enableTTS]);
+  }, [enableTTS, currentDeviceId, serverUrl]);
 
   // 添加系统消息
   const addSystemMessage = (content: string) => {
@@ -493,11 +506,8 @@ export function ChatScreen() {
 
   // 重新连接
   const handleReconnect = useCallback(() => {
-    if (currentProjectPath) {
-      connect(currentProjectPath);
-    } else {
-      addSystemMessage('请先选择一个项目');
-    }
+    // 先连接到服务器，项目路径稍后选择
+    connect(currentProjectPath || '');
   }, [currentProjectPath, connect]);
 
   // 切换项目
