@@ -83,8 +83,15 @@ export class ClaudeWebSocketService {
             // 处理不同类型的消息
             this.handleMessage(message);
 
-            // 通知所有监听器
-            this.messageCallbacks.forEach(callback => callback(message));
+            // 通知所有监听器（添加错误保护）
+            this.messageCallbacks.forEach(callback => {
+              try {
+                callback(message);
+              } catch (error) {
+                console.error('[WebSocket] Callback error:', error);
+                // 不中断其他callback的执行
+              }
+            });
           } catch (error) {
             console.error('解析消息失败:', error);
           }
