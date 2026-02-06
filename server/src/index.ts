@@ -449,6 +449,25 @@ wss.on('connection', (ws: WebSocket) => {
           break;
 
         // ================================================================
+        // User Input (Mobile → Desktop) - For permission/confirmation prompts
+        // ================================================================
+        case 'user-input':
+          if (!deviceId) {
+            console.error('❌ Device not registered');
+            break;
+          }
+
+          console.log(`⌨️  Forwarding user input to desktop (session: ${message.sessionId}, input: ${message.input})`);
+
+          deviceManager.sendToDesktop(message.sessionId, {
+            type: 'user-input',
+            data: {
+              input: message.input
+            }
+          });
+          break;
+
+        // ================================================================
         // Status Update (Desktop → Mobile)
         // ================================================================
         case 'status':

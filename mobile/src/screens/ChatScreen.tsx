@@ -60,6 +60,7 @@ export function ChatScreen() {
   const messageIdCounter = useRef(0);
   const pendingMessages = useRef<Map<string, Message>>(new Map());
   const loadedMessagesCount = useRef(0);
+  const hasReceivedChunk = useRef(false); // 跟踪是否已收到第一个chunk
 
   // 初始化服务
   useEffect(() => {
@@ -309,13 +310,17 @@ export function ChatScreen() {
 
       case 'permissionRequest':
         // 处理权限请求
-        console.log('[ChatScreen] 收到权限请求:', wsMessage.toolName, 'fromDeviceId:', wsMessage.fromDeviceId);
+        console.log('[ChatScreen] 收到权限请求:', JSON.stringify(wsMessage));
+        console.log('[ChatScreen] requestId:', wsMessage.requestId, 'toolName:', wsMessage.toolName);
         if (wsMessage.requestId && wsMessage.toolName) {
+          console.log('[ChatScreen] ✅ 显示权限对话框');
           const permissionPrompt = `Claude Code 请求权限:\n\n工具: ${wsMessage.toolName}\n\n是否允许执行?`;
           setConfirmPrompt(permissionPrompt);
           setConfirmMessageId(wsMessage.requestId);
           setPermissionFromDeviceId(wsMessage.fromDeviceId || '');
           setShowConfirmDialog(true);
+        } else {
+          console.log('[ChatScreen] ❌ 字段缺失，无法显示对话框');
         }
         break;
 
@@ -333,7 +338,47 @@ export function ChatScreen() {
         // 流式接收内容片段
         console.log('[ChatScreen] 收到chunk:', wsMessage.content?.substring(0, 30));
         if (wsMessage.content) {
+          // 收到第一个chunk时就清除loading状态，允许用户继续输入
+          if (!hasReceivedChunk.current) {
+            console.log('[ChatScreen] 收到第一个chunk，清除loading状态');
+            hasReceivedChunk.current = true;
+            setIsLoading(false);
+          }
+
+          // 追加消息
           appendAssistantMessage(wsMessage.content);
+
+          // 检测累积的完整消息内容（而不是单个chunk）
+          setMessages(prev => {
+            const lastMsg = prev[prev.length - 1];
+            if (lastMsg && lastMsg.type === 'assistant' && !showConfirmDialog) {
+              const fullContent = lastMsg.content.toLowerCase();
+
+              // 更宽松的权限检测规则
+              const hasPermissionRequest =
+                fullContent.includes('proceed?') ||
+                fullContent.includes('continue?') ||
+                fullContent.includes('allow') ||
+                fullContent.includes('approve') ||
+                fullContent.includes('(y/n)') ||
+                fullContent.includes('[y/n]') ||
+                (fullContent.includes('?') && (
+                  fullContent.includes('want to') ||
+                  fullContent.includes('should i') ||
+                  fullContent.includes('ok to') ||
+                  fullContent.includes('permission')
+                ));
+
+              if (hasPermissionRequest) {
+                console.log('[ChatScreen] 🔐 检测到权限请求，显示对话框');
+                const permissionPrompt = `Claude Code 请求权限:\n\n${lastMsg.content}\n\n是否允许执行?`;
+                setConfirmPrompt(permissionPrompt);
+                setConfirmMessageId(`manual-${Date.now()}`);
+                setShowConfirmDialog(true);
+              }
+            }
+            return prev;
+          });
         }
         break;
 
@@ -472,18 +517,23 @@ export function ChatScreen() {
     }, 100);
   };
 
-  // 追加助手消息内容（流式）
-  const appendAssistantMessage = (content: string) => {
+  // 追加助手消息内容（流式）- 优化性能，减少重渲染
+  const appendAssistantMessage = useCallback((content: string) => {
     setMessages(prev => {
       // 检查最后一条消息是否是助手消息
       if (prev.length > 0 && prev[prev.length - 1].type === 'assistant') {
-        // 追加到最后一条助手消息
-        const updated = [...prev];
-        updated[updated.length - 1] = {
-          ...updated[updated.length - 1],
-          content: updated[updated.length - 1].content + content
-        };
-        return updated;
+        // 使用浅拷贝优化，只更新最后一条消息
+        const lastIndex = prev.length - 1;
+        const lastMessage = prev[lastIndex];
+
+        // 直接修改数组末尾，避免完整拷贝
+        return [
+          ...prev.slice(0, lastIndex),
+          {
+            ...lastMessage,
+            content: lastMessage.content + content
+          }
+        ];
       } else {
         // 创建新的助手消息
         const message: Message = {
@@ -495,7 +545,7 @@ export function ChatScreen() {
         return [...prev, message];
       }
     });
-  };
+  }, []);
 
   // 添加错误消息
   const addErrorMessage = (content: string) => {
@@ -516,6 +566,7 @@ export function ChatScreen() {
     }
 
     const messageId = addUserMessage(text);
+    hasReceivedChunk.current = false; // 重置flag，准备接收新的响应
     setIsLoading(true);
 
     const ws = getWebSocketService(serverUrl);
@@ -675,17 +726,30 @@ export function ChatScreen() {
     // 判断是权限请求还是普通确认
     if (confirmMessageId && confirmPrompt.includes('Claude Code 请求权限')) {
       // 这是权限请求
-      console.log('[ChatScreen] 发送权限响应:', response === 'y' ? '允许' : '拒绝', 'to device:', permissionFromDeviceId);
-      ws.send({
-        type: 'permission-response',
-        sessionId: ws['sessionId'],
-        requestId: confirmMessageId,
-        approved: response === 'y',
-        reason: response === 'y' ? '' : '用户拒绝',
-        mode: 'once', // 仅本次
-        allowTools: [],
-        targetDeviceId: permissionFromDeviceId  // Echo back the source device
-      });
+      console.log('[ChatScreen] 发送权限响应:', response === 'y' ? '允许' : '拒绝');
+
+      // 检查是否是手动检测的权限请求（没有fromDeviceId）
+      if (confirmMessageId.startsWith('manual-')) {
+        // 手动检测的权限请求：直接发送用户输入到当前session的desktop
+        console.log('[ChatScreen] 手动检测的权限请求，发送用户输入');
+        ws.send({
+          type: 'user-input',
+          sessionId: ws['sessionId'],
+          input: response === 'y' ? 'y' : 'n'
+        });
+      } else {
+        // 正常的权限请求：发送permission-response
+        ws.send({
+          type: 'permission-response',
+          sessionId: ws['sessionId'],
+          requestId: confirmMessageId,
+          approved: response === 'y',
+          reason: response === 'y' ? '' : '用户拒绝',
+          mode: 'once', // 仅本次
+          allowTools: [],
+          targetDeviceId: permissionFromDeviceId  // Echo back the source device
+        });
+      }
     } else {
       // 普通确认提示
       console.log('[ChatScreen] 发送普通确认响应');
@@ -747,6 +811,12 @@ export function ChatScreen() {
           style={styles.chatList}
           onStartReached={handleLoadMore}
           onStartReachedThreshold={0.1}
+          // 性能优化配置
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          updateCellsBatchingPeriod={50}
+          windowSize={10}
+          initialNumToRender={15}
           ListHeaderComponent={
             isLoadingMore ? (
               <View style={{ padding: 10, alignItems: 'center' }}>

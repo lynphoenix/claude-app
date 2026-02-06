@@ -57,6 +57,7 @@ export interface WSMessage {
   requestId?: string; // 权限请求ID
   toolName?: string; // 工具名称
   input?: any; // 工具输入参数
+  fromDeviceId?: string; // 发起权限请求的设备ID
 }
 
 // 项目配置接口

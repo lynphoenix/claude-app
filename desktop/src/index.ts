@@ -106,10 +106,22 @@ async function main() {
 
     console.log(`📤 [Output] ${chunk.content.substring(0, 60)}...`);
 
+    // 检测是否为权限请求（不依赖chunk.isPermissionRequest标志）
+    const content = chunk.content.toLowerCase();
+    const looksLikePermission =
+      content.includes('proceed?') ||
+      content.includes('continue?') ||
+      content.includes('do you want to') ||
+      content.includes('would you like to') ||
+      content.includes('should i') ||
+      content.includes('(y/n)') ||
+      content.includes('[y/n]');
+
     // Send to server (mark as permission request if detected)
-    if (chunk.isPermissionRequest) {
+    if (chunk.isPermissionRequest || looksLikePermission) {
       // Send as permission request
       const requestId = uuidv4();
+      console.log(`🔐 [Permission] Detected permission request: ${chunk.content.substring(0, 100)}`);
       wsClient.send({
         type: 'permission-request',
         sessionId: currentSessionId,
@@ -309,6 +321,21 @@ async function main() {
     // Write response to Claude's stdin
     const response = data.approved ? 'yes' : 'no';
     currentProcess.writeInput(response);
+  });
+
+  // Handle user input from mobile (for permission/confirmation prompts)
+  wsClient.on('user-input', async (data: any) => {
+    console.log(`⌨️  [User Input] Received from mobile: ${data.input}`);
+
+    const currentProcess = processPool.getCurrentProcess();
+
+    if (!currentProcess || !currentProcess.isRunning()) {
+      console.error('❌ [User Input] No active Claude process');
+      return;
+    }
+
+    // Write input to Claude's stdin
+    currentProcess.writeInput(data.input);
   });
 
   // Handle graceful shutdown

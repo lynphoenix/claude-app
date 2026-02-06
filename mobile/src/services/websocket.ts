@@ -103,8 +103,9 @@ export class ClaudeWebSocketService {
           reject(error);
         };
 
-        this.ws.onclose = () => {
-          console.log('WebSocket 连接关闭');
+        this.ws.onclose = (event: any) => {
+          console.log('[WebSocket] Connection closed, code:', event?.code, 'reason:', event?.reason, 'wasClean:', event?.wasClean);
+          console.log('[WebSocket] onclose - Full event:', JSON.stringify(event));
           this.isRegistered = false;
           this.sessionId = null;
           this.updateStatus('disconnected');
@@ -174,8 +175,8 @@ export class ClaudeWebSocketService {
         break;
 
       case 'permissionRequest':
-        // 权限请求，自动批准或提示用户
-        this.handlePermissionRequest(message);
+        // 权限请求，直接传递给UI层的messageCallbacks处理
+        // 不在这里做任何处理，让UI层显示对话框
         break;
 
       case 'error':
@@ -187,21 +188,19 @@ export class ClaudeWebSocketService {
     }
   }
 
-  // 处理权限请求
-  private handlePermissionRequest(message: WSMessage): void {
-    console.log('🔐 收到权限请求:', message);
-
-    // TODO: 可以弹出UI让用户确认，这里暂时自动批准
-    const shouldApprove = true; // 可配置为询问用户
-
-    this.send({
-      type: 'permission-response',
-      sessionId: this.sessionId,
-      requestId: message.id,
-      approved: shouldApprove,
-      reason: shouldApprove ? 'Auto approved by mobile app' : 'User denied'
-    });
-  }
+  // 处理权限请求（已废弃，现在由UI层处理）
+  // private handlePermissionRequest(message: WSMessage): void {
+  //   console.log('🔐 收到权限请求:', message);
+  //   // 自动批准已禁用，应该由UI层显示对话框
+  //   const shouldApprove = true;
+  //   this.send({
+  //     type: 'permission-response',
+  //     sessionId: this.sessionId,
+  //     requestId: message.id,
+  //     approved: shouldApprove,
+  //     reason: shouldApprove ? 'Auto approved by mobile app' : 'User denied'
+  //   });
+  // }
 
   // 断开连接
   disconnect(): void {
@@ -217,16 +216,20 @@ export class ClaudeWebSocketService {
 
   // 发送消息（底层）
   private send(message: any): void {
+    console.log('[WebSocket] send() called, ws exists:', !!this.ws, 'readyState:', this.ws?.readyState);
     if (this.ws && this.ws.readyState === READY_STATES.OPEN) {
+      console.log('[WebSocket] Sending:', message.type);
       this.ws.send(JSON.stringify(message));
+      console.log('[WebSocket] Message sent successfully');
     } else {
-      console.error('WebSocket 未连接');
+      console.error('[WebSocket] Cannot send - WebSocket 未连接, readyState:', this.ws?.readyState);
     }
   }
 
   // 发送用户消息
   sendMessage(content: string, messageId: string): void {
     console.log('[WebSocket] sendMessage called, isRegistered:', this.isRegistered, 'sessionId:', this.sessionId);
+    console.log('[WebSocket] ws exists:', !!this.ws, 'readyState:', this.ws?.readyState);
 
     if (!this.isRegistered || !this.sessionId) {
       console.error('设备未注册或会话未初始化, isRegistered:', this.isRegistered, 'sessionId:', this.sessionId);
@@ -246,6 +249,9 @@ export class ClaudeWebSocketService {
       content,
       projectPath: this.projectPath || '/tmp/mobile-project'
     });
+
+    console.log('[WebSocket] sendMessage completed, checking connection...');
+    console.log('[WebSocket] After send - ws exists:', !!this.ws, 'readyState:', this.ws?.readyState);
   }
 
   // 切换项目
