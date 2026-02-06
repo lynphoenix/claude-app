@@ -68,7 +68,7 @@ export class DeviceManager {
         Array.from(this.devices.values()).forEach(d => {
           if (d.type === 'desktop' && d.id !== deviceId && d.sessionId === sessionId) {
             console.log(`🔓 Unbinding desktop ${d.id} from session ${sessionId} (replaced by ${deviceId})`);
-            d.sessionId = undefined;
+            d.sessionId = null;
           }
         });
       }

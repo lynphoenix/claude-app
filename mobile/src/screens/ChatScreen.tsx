@@ -91,11 +91,11 @@ export function ChatScreen() {
     // 注册消息监听器，返回清理函数
     const unsubscribe = ws.onMessage(handleWSMessage);
 
-    // 清理：组件卸载或handleWSMessage变化时移除旧监听器
+    // 清理：组件卸载时移除监听器
     return () => {
       unsubscribe();
     };
-  }, [serverUrl, handleWSMessage]);
+  }, [serverUrl]); // 只依赖serverUrl，handleWSMessage已经是稳定的
 
   // 连接到服务器
   const connect = useCallback(async (projectPath: string) => {
