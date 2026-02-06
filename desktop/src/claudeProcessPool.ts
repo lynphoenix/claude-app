@@ -34,7 +34,14 @@ export class ClaudeProcessPool extends EventEmitter {
    */
   async getOrCreateProcess(
     projectPath: string,
-    config: { claudePath: string }
+    config: {
+      claudePath: string;
+      apiConfig?: {
+        baseUrl?: string;
+        authToken?: string;
+        model?: string;
+      };
+    }
   ): Promise<ClaudeProcess> {
     // Check if we already have a running process for this project
     const existing = this.processes.get(projectPath);
@@ -62,7 +69,8 @@ export class ClaudeProcessPool extends EventEmitter {
     const process = new ClaudeProcess({
       claudePath: config.claudePath,
       workingDirectory: projectPath,
-      sessionId: claudeSessionId || undefined  // Will use --resume if available
+      sessionId: claudeSessionId || undefined,  // Will use --resume if available
+      apiConfig: config.apiConfig  // Pass API configuration
     });
 
     // Forward output events
@@ -85,7 +93,8 @@ export class ClaudeProcessPool extends EventEmitter {
       const newProcess = new ClaudeProcess({
         claudePath: config.claudePath,
         workingDirectory: projectPath,
-        sessionId: undefined  // No --resume, create new session
+        sessionId: undefined,  // No --resume, create new session
+        apiConfig: config.apiConfig  // Pass API configuration
       });
 
       // Re-setup event handlers

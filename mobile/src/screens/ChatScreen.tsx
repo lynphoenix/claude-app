@@ -268,13 +268,16 @@ export function ChatScreen() {
           loadedMessagesCount.current = wsMessage.history.length;
           setHasMoreHistory(wsMessage.hasMoreHistory || false);
           const historyMessages = parseSessionHistory(wsMessage.history);
-          // inverted模式下，直接设置消息即可（最新在底部）
           setMessages([...historyMessages, {
             id: `sys-${Date.now()}`,
             type: 'system',
             content: wsMessage.message || '项目已切换',
             timestamp: new Date()
           }]);
+          // 滚动到底部
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: false });
+          }, 100);
         } else {
           // 没有历史消息，只显示系统消息
           console.log('[ChatScreen] 切换项目，无历史消息');
@@ -338,6 +341,10 @@ export function ChatScreen() {
         // 响应完成
         console.log('[ChatScreen] 收到responseDone，设置isLoading=false');
         setIsLoading(false);
+        // 滚动到底部
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
         // 播放语音（使用完整的累积内容）
         if (enableTTS) {
           setMessages(prev => {
@@ -426,6 +433,10 @@ export function ChatScreen() {
       timestamp: new Date(),
     };
     setMessages(prev => [...prev, message]);
+    // 滚动到底部
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
   };
 
   // 添加用户消息
@@ -439,6 +450,10 @@ export function ChatScreen() {
     };
     setMessages(prev => [...prev, message]);
     pendingMessages.current.set(id, message);
+    // 滚动到底部
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
     return id;
   };
 
@@ -451,6 +466,10 @@ export function ChatScreen() {
       timestamp: new Date(),
     };
     setMessages(prev => [...prev, message]);
+    // 滚动到底部
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
   };
 
   // 追加助手消息内容（流式）
@@ -726,13 +745,12 @@ export function ChatScreen() {
           contentContainerStyle={styles.messagesList}
           keyboardShouldPersistTaps="handled"
           style={styles.chatList}
-          inverted  // 倒序显示，最新消息在底部
-          onEndReached={handleLoadMore}
-          onEndReachedThreshold={0.1}
-          ListFooterComponent={
+          onStartReached={handleLoadMore}
+          onStartReachedThreshold={0.1}
+          ListHeaderComponent={
             isLoadingMore ? (
               <View style={{ padding: 10, alignItems: 'center' }}>
-                <Text style={{ color: '#757575' }}>加载中...</Text>
+                <Text style={{ color: '#757575' }}>加载更多历史...</Text>
               </View>
             ) : null
           }

@@ -229,7 +229,12 @@ async function main() {
       // Get or create Claude process for this project
       // ProcessPool will automatically reuse if already running
       await processPool.getOrCreateProcess(projectPath, {
-        claudePath: config.claudePath!
+        claudePath: config.claudePath!,
+        apiConfig: {
+          baseUrl: 'https://api.302.ai',
+          authToken: 'sk-wHTe9eEipcthzG6Zv184GeKUbSr7HWDoBKAQuVc2foF9kJGh',
+          model: 'glm-4.7-coding-preview'
+        }
       });
 
       // Get the Claude session ID for writing messages
@@ -242,11 +247,12 @@ async function main() {
 
       // Send projectChanged confirmation with history
       console.log(`✅ [ChangeProject] Sending confirmation to mobile...`);
+      const hasHistory = formattedHistory.length > 0;
       wsClient.send({
         type: 'project-changed',
         sessionId: data.sessionId,
         projectPath: data.projectPath,
-        message: `切换到项目: ${data.projectPath}`,
+        message: hasHistory ? `切换到项目: ${data.projectPath}` : `切换到项目: ${data.projectPath}（无历史记录）`,
         history: formattedHistory,
         hasMoreHistory: history.length > 20  // If we loaded more than 20, there might be more
       });

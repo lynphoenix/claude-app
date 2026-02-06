@@ -11,6 +11,11 @@ export interface ClaudeProcessOptions {
   claudePath: string;
   workingDirectory: string;
   sessionId?: string;
+  apiConfig?: {
+    baseUrl?: string;
+    authToken?: string;
+    model?: string;
+  };
 }
 
 export interface OutputChunk {
@@ -91,7 +96,16 @@ export class ClaudeProcess extends EventEmitter {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        TERM: 'xterm-256color'
+        TERM: 'xterm-256color',
+        // Add API configuration if provided
+        ...(this.options.apiConfig?.baseUrl && { ANTHROPIC_BASE_URL: this.options.apiConfig.baseUrl }),
+        ...(this.options.apiConfig?.authToken && { ANTHROPIC_AUTH_TOKEN: this.options.apiConfig.authToken }),
+        ...(this.options.apiConfig?.model && {
+          ANTHROPIC_MODEL: this.options.apiConfig.model,
+          ANTHROPIC_DEFAULT_SONNET_MODEL: this.options.apiConfig.model,
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: this.options.apiConfig.model,
+          ANTHROPIC_DEFAULT_OPUS_MODEL: this.options.apiConfig.model
+        })
       }
     });
 
