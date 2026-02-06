@@ -62,6 +62,17 @@ export class DeviceManager {
   setDeviceSession(deviceId: string, sessionId: string): void {
     const device = this.devices.get(deviceId);
     if (device) {
+      // If this is a desktop device, unbind other desktops from this session
+      if (device.type === 'desktop') {
+        // Find all other desktops in this session and unbind them
+        Array.from(this.devices.values()).forEach(d => {
+          if (d.type === 'desktop' && d.id !== deviceId && d.sessionId === sessionId) {
+            console.log(`🔓 Unbinding desktop ${d.id} from session ${sessionId} (replaced by ${deviceId})`);
+            d.sessionId = undefined;
+          }
+        });
+      }
+
       device.sessionId = sessionId;
       console.log(`🔗 Device ${deviceId} bound to session ${sessionId}`);
     }
