@@ -97,6 +97,13 @@ async function main() {
   let currentClaudeSessionId: string | null = null; // Claude's internal session ID
   let lastMessageUuid: string | null = null; // Track last message UUID for linking
 
+  // ⭐ Store pending permission requests (maps our requestId to Claude's control_request_id)
+  const pendingPermissions = new Map<string, {
+    controlRequestId: string;  // Claude CLI's request_id
+    toolName: string;
+    input: any;
+  }>();
+
   // Handle output from Claude processes
   processPool.on('output', (projectPath, chunk) => {
     if (!currentSessionId) {
@@ -106,35 +113,13 @@ async function main() {
 
     console.log(`📤 [Output] ${chunk.content.substring(0, 60)}...`);
 
-    // 检测是否为权限请求（不依赖chunk.isPermissionRequest标志）
-    const content = chunk.content.toLowerCase();
-    const looksLikePermission =
-      content.includes('proceed?') ||
-      content.includes('continue?') ||
-      content.includes('do you want to') ||
-      content.includes('would you like to') ||
-      content.includes('should i') ||
-      content.includes('(y/n)') ||
-      content.includes('[y/n]');
+    // Note: Permission detection is now handled by control_request event
+    // Old text-based detection is kept as fallback (commented out)
+    // const content = chunk.content.toLowerCase();
+    // const looksLikePermission = content.includes('proceed?') || ...
 
-    // Send to server (mark as permission request if detected)
-    if (chunk.isPermissionRequest || looksLikePermission) {
-      // Send as permission request
-      const requestId = uuidv4();
-      console.log(`🔐 [Permission] Detected permission request: ${chunk.content.substring(0, 100)}`);
-      wsClient.send({
-        type: 'permission-request',
-        sessionId: currentSessionId,
-        data: {
-          requestId,
-          toolName: 'user-input',
-          input: { prompt: chunk.content }
-        }
-      });
-    } else {
-      // Send as normal output
-      wsClient.sendOutputChunk(currentSessionId, chunk.content, false);
-    }
+    // Send as normal output
+    wsClient.sendOutputChunk(currentSessionId, chunk.content, false);
 
     // Store in database
     if (sessionSync.isEnabled()) {
@@ -154,6 +139,57 @@ async function main() {
       const assistantUuid = sessionWriter.writeAssistantMessage(currentProjectPath, currentClaudeSessionId, chunk.content, lastMessageUuid || undefined);
       lastMessageUuid = assistantUuid; // Save for next message to link to
     }
+  });
+
+  // ⭐ Handle control_request from Claude CLI (standard permission protocol)
+  processPool.on('control_request', (projectPath, controlRequest) => {
+    if (!currentSessionId) {
+      console.log(`⚠️  [ControlRequest] No active session, denying by default`);
+      const currentProcess = processPool.getCurrentProcess();
+      if (currentProcess) {
+        currentProcess.sendControlResponse(controlRequest.request_id, false);
+      }
+      return;
+    }
+
+    console.log(`🔐 [ControlRequest] Tool: ${controlRequest.request.tool_name}`);
+    console.log(`🔐 [ControlRequest] Claude Request ID: ${controlRequest.request_id}`);
+    console.log(`🔐 [ControlRequest] Input:`, JSON.stringify(controlRequest.request.input || {}).substring(0, 200));
+
+    const requestId = uuidv4();  // Our request ID for Mobile communication
+
+    // Store the mapping between our requestId and Claude's control_request_id
+    pendingPermissions.set(requestId, {
+      controlRequestId: controlRequest.request_id,
+      toolName: controlRequest.request.tool_name,
+      input: controlRequest.request.input
+    });
+
+    // Send permission request to Mobile via Server
+    wsClient.send({
+      type: 'permission-request',
+      sessionId: currentSessionId,
+      data: {
+        requestId,
+        toolName: controlRequest.request.tool_name,  // ⭐ Real tool name (e.g., "Bash", "Edit")
+        input: controlRequest.request.input          // ⭐ Structured input (e.g., {command: "ls"})
+      }
+    });
+
+    // Timeout handling (30 seconds)
+    setTimeout(() => {
+      if (pendingPermissions.has(requestId)) {
+        console.log(`⏱️ [ControlRequest] Timeout for request ${requestId}, auto-denying`);
+        const currentProcess = processPool.getCurrentProcess();
+        if (currentProcess) {
+          const pending = pendingPermissions.get(requestId);
+          if (pending) {
+            currentProcess.sendControlResponse(pending.controlRequestId, false);
+          }
+        }
+        pendingPermissions.delete(requestId);
+      }
+    }, 30000);
   });
 
   // Connect to server
@@ -309,18 +345,32 @@ async function main() {
 
   // Handle permission responses from server (mobile user answered permission request)
   wsClient.on('permission-response', async (data: PermissionResponseFromServer['data']) => {
-    console.log(`✅ [Permission] Response: ${data.approved ? 'APPROVED' : 'DENIED'}`);
+    console.log(`✅ [PermissionResponse] Response: ${data.approved ? 'APPROVED' : 'DENIED'}`);
+    console.log(`✅ [PermissionResponse] Request ID: ${data.id}`);
+
+    // Look up the pending permission request
+    const pending = pendingPermissions.get(data.id);
+    if (!pending) {
+      console.error(`❌ [PermissionResponse] Unknown requestId: ${data.id}`);
+      return;
+    }
+
+    console.log(`✅ [PermissionResponse] Found pending request for tool: ${pending.toolName}`);
+    console.log(`✅ [PermissionResponse] Claude Control Request ID: ${pending.controlRequestId}`);
 
     const currentProcess = processPool.getCurrentProcess();
 
     if (!currentProcess || !currentProcess.isRunning()) {
-      console.error('❌ [Permission] No active Claude process');
+      console.error('❌ [PermissionResponse] No active Claude process');
+      pendingPermissions.delete(data.id);
       return;
     }
 
-    // Write response to Claude's stdin
-    const response = data.approved ? 'yes' : 'no';
-    currentProcess.writeInput(response);
+    // ⭐ Send control_response to Claude CLI (using standard protocol)
+    currentProcess.sendControlResponse(pending.controlRequestId, data.approved);
+
+    // Clean up
+    pendingPermissions.delete(data.id);
   });
 
   // Handle user input from mobile (for permission/confirmation prompts)

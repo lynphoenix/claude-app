@@ -81,6 +81,7 @@ export class ClaudeProcess extends EventEmitter {
       '--verbose',  // Required for stream-json output
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
+      '--permission-prompt-tool', 'stdio',  // ⭐ Enable standard permission protocol
       '--replay-user-messages',
       '--no-session-persistence'  // Disable Claude's auto-save, let SessionWriter handle it
     ];
@@ -158,6 +159,17 @@ export class ClaudeProcess extends EventEmitter {
 
       try {
         const json = JSON.parse(line);
+
+        // ⭐ Handle control_request (permission requests)
+        if (json.type === 'control_request') {
+          console.log(`[ClaudeProcess] 🔐 control_request detected: ${json.request?.tool_name}`);
+          console.log(`[ClaudeProcess] 🔐 Request ID: ${json.request_id}`);
+          console.log(`[ClaudeProcess] 🔐 Input:`, JSON.stringify(json.request?.input || {}).substring(0, 200));
+
+          // Emit control_request event (not as regular output)
+          this.emit('control_request', json);
+          continue;  // Don't process as regular output
+        }
 
         // Handle different message types
         if (json.type === 'assistant') {
@@ -288,6 +300,40 @@ export class ClaudeProcess extends EventEmitter {
       return true;
     } catch (error) {
       console.error('[ClaudeProcess] Error writing input:', error);
+      return false;
+    }
+  }
+
+  /**
+   * ⭐ Send control_response to Claude CLI (for permission requests)
+   * This uses the standard Claude CLI permission protocol
+   */
+  sendControlResponse(requestId: string, approved: boolean): boolean {
+    if (!this.process || !this.process.stdin) {
+      console.error('[ClaudeProcess] Cannot send control_response: process not running');
+      return false;
+    }
+
+    try {
+      const response = {
+        type: 'control_response',
+        response: {
+          subtype: 'success',
+          request_id: requestId,
+          response: {
+            behavior: approved ? 'allow' : 'deny'
+          }
+        }
+      };
+
+      console.log(`[ClaudeProcess] 📤 Sending control_response: ${approved ? 'ALLOW' : 'DENY'}`);
+      console.log(`[ClaudeProcess] 📤 Request ID: ${requestId}`);
+
+      const jsonLine = JSON.stringify(response) + '\n';
+      this.process.stdin.write(jsonLine);
+      return true;
+    } catch (error) {
+      console.error('[ClaudeProcess] Error sending control_response:', error);
       return false;
     }
   }

@@ -81,6 +81,14 @@ export class ClaudeProcessPool extends EventEmitter {
       }
     });
 
+    // ⭐ Forward control_request events (for permission requests)
+    process.on('control_request', (request: any) => {
+      // Only emit if this is the currently active project
+      if (this.currentProjectPath === projectPath) {
+        this.emit('control_request', projectPath, request);
+      }
+    });
+
     // Handle session-not-found (need to restart without --resume)
     process.on('session-not-found', async () => {
       console.log(`🔄 [ProcessPool] Session not found, restarting without --resume for ${projectPath}`);
@@ -101,6 +109,13 @@ export class ClaudeProcessPool extends EventEmitter {
       newProcess.on('output', (chunk: OutputChunk) => {
         if (this.currentProjectPath === projectPath) {
           this.emit('output', projectPath, chunk);
+        }
+      });
+
+      // ⭐ Forward control_request for restarted process
+      newProcess.on('control_request', (request: any) => {
+        if (this.currentProjectPath === projectPath) {
+          this.emit('control_request', projectPath, request);
         }
       });
 
